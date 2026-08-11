@@ -46,19 +46,32 @@ const getActiveFirebaseConfig = () => {
 
 const config = getActiveFirebaseConfig();
 
+// Safe Firebase Initialization
 let app: FirebaseApp;
-if (!getApps().length) {
-  app = initializeApp(config);
-} else {
-  app = getApp();
+try {
+  if (!getApps().length) {
+    app = initializeApp(config);
+  } else {
+    app = getApp();
+  }
+} catch (err) {
+  console.warn('Firebase initialization warning:', err);
+  app = getApps().length ? getApp() : initializeApp({ apiKey: 'dummy-key', projectId: 'demo-project' });
 }
 
 export const auth = getAuth(app);
 
 // Use specified databaseId if present, else default
-export const db: Firestore = config.firestoreDatabaseId
-  ? getFirestore(app, config.firestoreDatabaseId)
-  : getFirestore(app);
+export const db: Firestore = (() => {
+  try {
+    return config.firestoreDatabaseId
+      ? getFirestore(app, config.firestoreDatabaseId)
+      : getFirestore(app);
+  } catch (err) {
+    console.warn('Firestore initialization warning:', err);
+    return getFirestore(app);
+  }
+})();
 
 export const googleProvider = new GoogleAuthProvider();
 
@@ -77,10 +90,24 @@ export const mapFirebaseUser = (user: FirebaseUser | null): UserProfile | null =
 // --- AUTH HELPERS ---
 
 export const subscribeToAuth = (callback: (user: UserProfile | null) => void) => {
-  return onAuthStateChanged(auth, (firebaseUser) => {
-    callback(mapFirebaseUser(firebaseUser));
-  });
+  try {
+    return onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        callback(mapFirebaseUser(firebaseUser));
+      },
+      (error) => {
+        console.warn('Auth state change error:', error);
+        callback(null);
+      }
+    );
+  } catch (err) {
+    console.warn('subscribeToAuth exception:', err);
+    callback(null);
+    return () => {};
+  }
 };
+
 
 export const loginWithEmail = async (email: string, pass: string) => {
   const credential = await signInWithEmailAndPassword(auth, email, pass);
