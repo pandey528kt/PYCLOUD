@@ -21,9 +21,11 @@ import {
   ChevronUp,
   X,
   AlertTriangle,
+  Wand2,
 } from 'lucide-react';
 import { Project, ExecutionResult, UserProfile, ProjectPrivacy } from '../types';
 import { executePythonCode } from '../lib/pyodide';
+import { formatPythonCode } from '../lib/pythonFormatter';
 import { VersionHistoryModal } from './VersionHistoryModal';
 import { ShareModal } from './ShareModal';
 
@@ -64,14 +66,49 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [isFormattedToast, setIsFormattedToast] = useState(false);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(true);
 
   // Auto-save tracking
   const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved');
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const editorRef = useRef<any>(null);
 
   // Check if current user is owner
   const isOwner = currentUser ? currentUser.uid === project.ownerId : false;
+
+  // Format Code handler (Black / PEP 8 Engine)
+  const handleFormatCode = useCallback(() => {
+    const formatted = formatPythonCode(code);
+    if (formatted !== code) {
+      setCode(formatted);
+      handleCodeChange(formatted);
+      setIsFormattedToast(true);
+      setTimeout(() => setIsFormattedToast(false), 2500);
+    } else {
+      setIsFormattedToast(true);
+      setTimeout(() => setIsFormattedToast(false), 1500);
+    }
+  }, [code, isOwner]);
+
+  // Monaco Editor mount callback to register DocumentFormattingEditProvider
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+
+    // Register Python format provider for right-click / Shift+Alt+F
+    monaco.languages.registerDocumentFormattingEditProvider('python', {
+      provideDocumentFormattingEdits(model) {
+        const currentContent = model.getValue();
+        const formatted = formatPythonCode(currentContent);
+        return [
+          {
+            range: model.getFullModelRange(),
+            text: formatted,
+          },
+        ];
+      },
+    });
+  };
 
   // Keep local state in sync when project changes
   useEffect(() => {
@@ -289,6 +326,16 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
             <span className="hidden md:inline">History</span>
           </button>
 
+          {/* Format Code Button */}
+          <button
+            onClick={handleFormatCode}
+            className="flex items-center gap-1.5 rounded-xl border border-white/5 bg-[#050505] px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-[#101015] hover:text-blue-400 transition-all"
+            title="Auto-format Python code (Black / PEP 8 style) [Shift+Alt+F]"
+          >
+            <Wand2 className="h-3.5 w-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Format</span>
+          </button>
+
           {/* Share Button */}
           <button
             onClick={() => setShowShareModal(true)}
@@ -324,12 +371,20 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         
         {/* Monaco Editor Container */}
         <div className="flex-1 min-h-0 bg-[#050505] relative">
+          {isFormattedToast && (
+            <div className="absolute top-3 right-6 z-20 flex items-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-950/90 backdrop-blur-md px-3 py-1.5 text-xs text-blue-300 shadow-xl animate-fade-in font-mono">
+              <Wand2 className="h-3.5 w-3.5 text-blue-400" />
+              <span>Python Code Formatted (PEP 8)</span>
+            </div>
+          )}
+
           <Editor
             height="100%"
             defaultLanguage="python"
             theme="vs-dark"
             value={code}
             onChange={handleCodeChange}
+            onMount={handleEditorDidMount}
             options={{
               readOnly: !isOwner,
               fontSize: 14,
