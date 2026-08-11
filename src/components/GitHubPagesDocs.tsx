@@ -176,11 +176,17 @@ git push -u origin main`}
           <pre>{workflowYaml}</pre>
         </div>
 
-        <div className="rounded-xl border border-blue-800/60 bg-blue-950/40 p-3 text-xs text-blue-300 flex items-center gap-2">
-          <Globe className="h-4 w-4 shrink-0" />
-          <span>
-            Then in your GitHub repository, go to <strong>Settings &gt; Pages</strong> and set Source to <strong>gh-pages branch</strong>!
-          </span>
+        <div className="rounded-xl border border-blue-800/60 bg-blue-950/40 p-3 text-xs text-blue-300 space-y-2">
+          <div className="flex items-center gap-2 font-semibold">
+            <Globe className="h-4 w-4 shrink-0" />
+            <span>Avoid Blank White Screen on GitHub Pages:</span>
+          </div>
+          <p className="text-[11px] text-gray-300 leading-relaxed pl-6">
+            Make sure <code>vite.config.ts</code> contains <code>base: './'</code> (pre-configured in this repository). This ensures asset paths like scripts and styles use relative URLs matching your GitHub repository subpath (e.g. <code>https://username.github.io/repository-name/</code>).
+          </p>
+          <p className="text-[11px] text-gray-300 leading-relaxed pl-6">
+            In your GitHub repository, go to <strong>Settings &gt; Pages</strong> and set Source to <strong>gh-pages branch</strong>!
+          </p>
         </div>
       </Card3D>
 
