@@ -1,0 +1,6 @@
+{
+  "name": "PyCloud Workspace",
+  "description": "A 3D Python Code Cloud Workspace with live browser execution, version history, sharing, and GitHub Pages compatibility.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

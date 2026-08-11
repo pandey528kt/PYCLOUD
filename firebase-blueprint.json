@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "projects": {
+      "title": "Projects",
+      "description": "Python projects created by users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "code": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "privacy": { "type": "string", "enum": ["private", "shared"] },
+        "isShared": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["title", "code", "ownerId", "privacy"]
+    },
+    "project_versions": {
+      "title": "Project Versions",
+      "description": "Snapshot version history of python projects",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "code": { "type": "string" },
+        "label": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["projectId", "code", "createdAt"]
+    }
+  }
+}
