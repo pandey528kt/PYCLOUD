@@ -80,6 +80,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
 
   // Workspace Execution Mode: Script Mode (.py Editor) vs Interactive Mode (Python IDLE Shell)
   const [workspaceMode, setWorkspaceMode] = useState<'script' | 'interactive'>('script');
+  const [editorTheme, setEditorTheme] = useState<'vscode-dark' | 'idle-light'>('vscode-dark');
   const [idleVariables, setIdleVariables] = useState<Array<{ name: string; type: string; value: string }>>([]);
 
   // Refresh variables in IDLE environment
@@ -183,9 +184,61 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
     }
   }, [code, isOwner]);
 
-  // Monaco Editor mount callback to register DocumentFormattingEditProvider
+  // Monaco Editor mount callback to register themes and format providers
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+
+    // Define VS Code Dark+ Theme
+    monaco.editor.defineTheme('vscode-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'keyword', foreground: '569CD6', fontStyle: 'bold' },
+        { token: 'type', foreground: '4EC9B0' },
+        { token: 'function', foreground: 'DCDCAA' },
+        { token: 'string', foreground: 'CE9178' },
+        { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+        { token: 'number', foreground: 'B5CEA8' },
+        { token: 'delimiter', foreground: 'D4D4D4' },
+      ],
+      colors: {
+        'editor.background': '#1E1E1E',
+        'editor.foreground': '#D4D4D4',
+        'editorCursor.foreground': '#AEAFAD',
+        'editor.lineHighlightBackground': '#2A2D2E',
+        'editorLineNumber.foreground': '#858585',
+        'editorLineNumber.activeForeground': '#C6C6C6',
+        'editor.selectionBackground': '#264F78',
+        'editorIndentGuide.background1': '#404040',
+        'editorIndentGuide.activeBackground1': '#707070',
+      },
+    });
+
+    // Define Python IDLE Classic Script Mode Theme
+    monaco.editor.defineTheme('idle-light', {
+      base: 'vs',
+      inherit: true,
+      rules: [
+        { token: 'keyword', foreground: '700070', fontStyle: 'bold' },
+        { token: 'function', foreground: '0000FF', fontStyle: 'bold' },
+        { token: 'string', foreground: '008000' },
+        { token: 'comment', foreground: 'DD0000', fontStyle: 'italic' },
+        { token: 'number', foreground: '000000' },
+        { token: 'type', foreground: '0000FF' },
+      ],
+      colors: {
+        'editor.background': '#FFFFFF',
+        'editor.foreground': '#000000',
+        'editorCursor.foreground': '#000000',
+        'editor.lineHighlightBackground': '#F3F3F3',
+        'editorLineNumber.foreground': '#7A7A7A',
+        'editorLineNumber.activeForeground': '#000000',
+        'editor.selectionBackground': '#B5D5FF',
+      },
+    });
+
+    // Set initial theme
+    monaco.editor.setTheme(editorTheme);
 
     // Register Python format provider for right-click / Shift+Alt+F
     monaco.languages.registerDocumentFormattingEditProvider('python', {
@@ -208,6 +261,13 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
     setTitle(project.title);
     setSaveStatus('saved');
   }, [project.id]);
+
+  // Update Monaco theme dynamically
+  useEffect(() => {
+    if ((window as any).monaco) {
+      (window as any).monaco.editor.setTheme(editorTheme);
+    }
+  }, [editorTheme]);
 
   // Debounced auto-save effect
   const handleCodeChange = (newCode: string | undefined) => {
@@ -470,40 +530,74 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Workspace Sub-Header: Execution Mode Selector */}
-      <div className="flex items-center justify-between border-b border-white/5 bg-[#060608] px-4 py-1.5 text-xs font-mono select-none">
-        <div className="flex items-center gap-2">
-          <span className="text-gray-400 font-medium text-[11px] uppercase tracking-wider hidden sm:inline">Execution Mode:</span>
-          <div className="flex items-center bg-[#0d0d12] p-0.5 rounded-xl border border-white/10 shadow-inner">
-            <button
-              onClick={() => setWorkspaceMode('script')}
-              className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
-                workspaceMode === 'script'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-              }`}
-              title="Script Mode: Multi-line Python file editor and full output runner"
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              <span>Script Mode (.py)</span>
-            </button>
+      {/* Workspace Sub-Header: Execution Mode Selector & Theme Switcher */}
+      <div className="flex items-center justify-between border-b border-white/5 bg-[#060608] px-4 py-1.5 text-xs font-mono select-none flex-wrap gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="text-gray-400 font-medium text-[11px] uppercase tracking-wider hidden sm:inline">Mode:</span>
+            <div className="flex items-center bg-[#0d0d12] p-0.5 rounded-xl border border-white/10 shadow-inner">
+              <button
+                onClick={() => setWorkspaceMode('script')}
+                className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                  workspaceMode === 'script'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+                title="Script Mode: Multi-line Python file editor and full output runner"
+              >
+                <Code2 className="h-3.5 w-3.5" />
+                <span>Script Mode (.py)</span>
+              </button>
 
-            <button
-              onClick={() => {
-                setWorkspaceMode('interactive');
-                refreshIdleVars();
-              }}
-              className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
-                workspaceMode === 'interactive'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-              }`}
-              title="Interactive Mode: Python IDLE line-by-line REPL shell"
-            >
-              <Cpu className="h-3.5 w-3.5 text-emerald-300" />
-              <span>Interactive Mode (IDLE Shell)</span>
-            </button>
+              <button
+                onClick={() => {
+                  setWorkspaceMode('interactive');
+                  refreshIdleVars();
+                }}
+                className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                  workspaceMode === 'interactive'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                }`}
+                title="Interactive Mode: Python IDLE line-by-line REPL shell"
+              >
+                <Cpu className="h-3.5 w-3.5 text-emerald-300" />
+                <span>Interactive Mode (IDLE Shell)</span>
+              </button>
+            </div>
           </div>
+
+          {/* Theme Selector for Editor */}
+          {workspaceMode === 'script' && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400 font-medium text-[11px] uppercase tracking-wider hidden sm:inline">Interface Theme:</span>
+              <div className="flex items-center bg-[#0d0d12] p-0.5 rounded-xl border border-white/10 shadow-inner">
+                <button
+                  onClick={() => setEditorTheme('vscode-dark')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium text-xs transition-all ${
+                    editorTheme === 'vscode-dark'
+                      ? 'bg-blue-950/90 text-blue-300 border border-blue-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                  title="VS Code Dark+ IDE Interface"
+                >
+                  <span>🌙 VS Code Dark+</span>
+                </button>
+
+                <button
+                  onClick={() => setEditorTheme('idle-light')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium text-xs transition-all ${
+                    editorTheme === 'idle-light'
+                      ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300 shadow-sm'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                  title="Python IDLE Script Mode Classic Interface"
+                >
+                  <span>☀️ IDLE Classic</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-[11px] text-gray-400">
@@ -723,7 +817,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
             <Editor
               height="100%"
               defaultLanguage="python"
-              theme="vs-dark"
+              theme={editorTheme}
               value={code}
               onChange={handleCodeChange}
               onMount={handleEditorDidMount}
@@ -734,7 +828,20 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
                 tabSize: 4,
-                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                fontFamily: "'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
+                fontLigatures: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                renderLineHighlight: 'all',
+                bracketPairColorization: { enabled: true },
+                guides: { indentation: true, bracketPairs: true },
+                smoothScrolling: true,
+                formatOnType: true,
+                formatOnPaste: true,
+                autoClosingBrackets: 'always',
+                autoClosingQuotes: 'always',
+                suggestOnTriggerCharacters: true,
+                acceptSuggestionOnEnter: 'on',
                 padding: { top: 12, bottom: 12 },
                 lineNumbersMinChars: 3,
               }}
