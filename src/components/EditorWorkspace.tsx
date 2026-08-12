@@ -31,6 +31,17 @@ import {
   CircleDot,
   Variable,
   ArrowRight,
+  Package,
+  Keyboard,
+  FileCode,
+  WrapText,
+  ZoomIn,
+  ZoomOut,
+  Layers,
+  Indent,
+  Outdent,
+  Plus,
+  FileText,
 } from 'lucide-react';
 import { Project, ExecutionResult, UserProfile, ProjectPrivacy, DebugVariable } from '../types';
 import {
@@ -50,6 +61,10 @@ import {
 import { formatPythonCode } from '../lib/pythonFormatter';
 import { VersionHistoryModal } from './VersionHistoryModal';
 import { ShareModal } from './ShareModal';
+import { CodeSnippetsModal } from './CodeSnippetsModal';
+import { PackageManagerModal } from './PackageManagerModal';
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
+import { Card3D } from './3d/Card3D';
 
 interface EditorWorkspaceProps {
   project: Project;
@@ -87,9 +102,26 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   // UI Modals & Panels
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showSnippetsModal, setShowSnippetsModal] = useState(false);
+  const [showPackagesModal, setShowPackagesModal] = useState(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+  const [lastClearedCode, setLastClearedCode] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [isFormattedToast, setIsFormattedToast] = useState(false);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(true);
+
+  // Editor Display & Tab Settings
+  const [fontSize, setFontSize] = useState<number>(14);
+  const [wordWrap, setWordWrap] = useState<'on' | 'off'>('on');
+  const [showMinimap, setShowMinimap] = useState<boolean>(true);
+  const [tabSize, setTabSize] = useState<number>(4);
+
+  // Script File Tabs
+  const [scriptTabs, setScriptTabs] = useState<Array<{ id: string; title: string; code: string }>>([
+    { id: 'main', title: 'main.py', code: project.code || '' },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('main');
 
   // Workspace Execution Mode: Script Mode (.py Editor) vs Interactive Mode (Python IDLE Shell)
   const [workspaceMode, setWorkspaceMode] = useState<'script' | 'interactive'>('script');
@@ -338,10 +370,80 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
     );
   }, [debugBreakpoints, debugCurrentLine, isDebugPaused, toggleBreakpoint]);
 
+  // Clear All Code Handler
+  const handleClearAllCode = () => {
+    setLastClearedCode(code);
+    handleCodeChange('');
+    setShowClearConfirm(false);
+  };
+
+  const handleUndoClearCode = () => {
+    if (lastClearedCode !== null) {
+      handleCodeChange(lastClearedCode);
+      setLastClearedCode(null);
+    }
+  };
+
+  // Indent & Outdent Tab Handlers
+  const handleIndentTab = () => {
+    if (editorRef.current) {
+      editorRef.current.trigger('keyboard', 'tab', null);
+      editorRef.current.focus();
+    }
+  };
+
+  const handleOutdentTab = () => {
+    if (editorRef.current) {
+      editorRef.current.trigger('source', 'editor.action.outdentLines', null);
+      editorRef.current.focus();
+    }
+  };
+
+  // Script File Tabs Management
+  const handleAddNewScriptTab = () => {
+    const nextNum = scriptTabs.length + 1;
+    const newTabId = `tab_${Date.now()}`;
+    const newTab = {
+      id: newTabId,
+      title: `script_${nextNum}.py`,
+      code: `# Python module script ${nextNum}\nprint("Hello from script_${nextNum}.py!")\n`,
+    };
+    setScriptTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTabId);
+    setCode(newTab.code);
+  };
+
+  const handleSelectScriptTab = (tabId: string) => {
+    setScriptTabs((prev) =>
+      prev.map((t) => (t.id === activeTabId ? { ...t, code } : t))
+    );
+    setActiveTabId(tabId);
+    const target = scriptTabs.find((t) => t.id === tabId);
+    if (target) {
+      setCode(target.code);
+    }
+  };
+
+  const handleCloseScriptTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (scriptTabs.length <= 1) return;
+    const nextTabs = scriptTabs.filter((t) => t.id !== tabId);
+    setScriptTabs(nextTabs);
+    if (activeTabId === tabId) {
+      const fallback = nextTabs[nextTabs.length - 1];
+      setActiveTabId(fallback.id);
+      setCode(fallback.code);
+    }
+  };
+
   // Keep local state in sync when project changes
   useEffect(() => {
     setCode(project.code);
     setTitle(project.title);
+    setScriptTabs([
+      { id: 'main', title: 'main.py', code: project.code || '' }
+    ]);
+    setActiveTabId('main');
     setSaveStatus('saved');
     preloadPythonEngine();
   }, [project.id]);
@@ -357,6 +459,9 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   const handleCodeChange = (newCode: string | undefined) => {
     const updated = newCode || '';
     setCode(updated);
+    setScriptTabs((prev) =>
+      prev.map((t) => (t.id === activeTabId ? { ...t, code: updated } : t))
+    );
 
     if (!isOwner) return; // Read only for non-owners
 
@@ -537,6 +642,34 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   return (
     <div className="flex flex-col h-[calc(100vh-61px)] bg-[#050505] text-gray-200 overflow-hidden">
       
+      {/* Restorable Cleared Code Undo Banner */}
+      {lastClearedCode !== null && (
+        <div className="bg-amber-950/90 border-b border-amber-500/50 px-4 py-2 flex items-center justify-between gap-3 text-xs text-amber-200 shadow-md">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Code Cleared:</strong> Editor was cleared. Click undo to restore your Python script.
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleUndoClearCode}
+              className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs transition-all shadow active:scale-95"
+            >
+              Undo Clear
+            </button>
+            <button
+              onClick={() => setLastClearedCode(null)}
+              className="p-1 text-amber-400 hover:text-amber-200 transition-colors"
+              title="Dismiss banner"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Read-Only Banner for Shared non-owner projects */}
       {!isOwner && (
         <div className="bg-amber-950/80 border-b border-amber-800/60 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-200">
@@ -735,6 +868,17 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
             title="Download .py file"
           >
             <Download className="h-3.5 w-3.5" />
+          </button>
+
+          {/* Clear All Code Button */}
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            disabled={!code}
+            className="flex items-center gap-1.5 btn-3d-dark rounded-xl px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-red-400 disabled:opacity-40 transition-colors"
+            title="Clear all code in python editor"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-red-400" />
+            <span className="hidden sm:inline">Clear Code</span>
           </button>
         </div>
       </div>
@@ -1015,35 +1159,192 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
           
           {/* Monaco Editor Container */}
-          <div className="flex-1 min-h-0 bg-[#050505] relative">
+          <div className="flex-1 min-h-0 bg-[#050505] relative flex flex-col">
+
+            {/* File Tabs Bar */}
+            <div className="flex items-center gap-1 bg-[#06080e] border-b border-slate-800/80 px-2 pt-1.5 overflow-x-auto scrollbar-none select-none">
+              {scriptTabs.map((tab) => {
+                const isActive = tab.id === activeTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    onClick={() => handleSelectScriptTab(tab.id)}
+                    className={`group flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-mono font-bold cursor-pointer transition-all border-t border-x ${
+                      isActive
+                        ? 'bg-[#0a0c12] text-amber-300 border-slate-700 shadow-sm border-b-transparent'
+                        : 'bg-[#0b0e17] text-slate-400 hover:text-slate-200 border-slate-800/60 hover:bg-[#0f121d]'
+                    }`}
+                  >
+                    <FileText className={`h-3.5 w-3.5 ${isActive ? 'text-amber-400' : 'text-slate-500'}`} />
+                    <span>{tab.title}</span>
+
+                    {scriptTabs.length > 1 && (
+                      <button
+                        onClick={(e) => handleCloseScriptTab(tab.id, e)}
+                        className="p-0.5 rounded hover:bg-white/10 text-slate-500 hover:text-red-400 transition-colors"
+                        title="Close Tab"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add New File Tab Button */}
+              <button
+                onClick={handleAddNewScriptTab}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-t-lg bg-[#0a0c12] hover:bg-[#121522] border border-slate-800 text-slate-400 hover:text-amber-300 text-xs font-bold transition-all ml-1"
+                title="Open New Python Module Tab"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">New Tab</span>
+              </button>
+            </div>
+            
+            {/* Clean Coder Helper Bar */}
+            <div className="flex items-center justify-between border-b border-slate-800 bg-[#0a0c12] px-3 py-1.5 text-xs font-mono select-none flex-wrap gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Tab Indentation Quick Controls */}
+                <div className="flex items-center gap-1 bg-[#131622] px-1.5 py-0.5 rounded-lg border border-slate-800">
+                  <button
+                    onClick={handleOutdentTab}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 text-slate-300 hover:text-amber-300 transition-colors"
+                    title="Outdent Line / Selection (Shift + Tab)"
+                  >
+                    <Outdent className="h-3 w-3 text-amber-400" />
+                    <span className="text-[10px] font-bold">Shift+Tab</span>
+                  </button>
+                  <div className="h-3 w-[1px] bg-slate-800" />
+                  <button
+                    onClick={handleIndentTab}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 text-slate-300 hover:text-amber-300 transition-colors"
+                    title="Indent Line / Selection (Tab)"
+                  >
+                    <Indent className="h-3 w-3 text-amber-400" />
+                    <span className="text-[10px] font-bold">Tab</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setShowSnippetsModal(true)}
+                  className="flex items-center gap-1.5 btn-3d-dark rounded-lg px-2.5 py-1 text-xs font-bold text-amber-300 hover:text-amber-200"
+                  title="Open Python Snippets Library for 1-click code insertion"
+                >
+                  <FileCode className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Snippets</span>
+                </button>
+
+                <button
+                  onClick={() => setShowPackagesModal(true)}
+                  className="flex items-center gap-1.5 btn-3d-dark rounded-lg px-2.5 py-1 text-xs font-bold text-slate-300 hover:text-emerald-300"
+                  title="Install PyPI packages dynamically via Pyodide micropip"
+                >
+                  <Package className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Packages</span>
+                </button>
+
+                <button
+                  onClick={() => setShowShortcutsModal(true)}
+                  className="flex items-center gap-1.5 btn-3d-dark rounded-lg px-2.5 py-1 text-xs font-bold text-slate-300 hover:text-blue-300"
+                  title="View keyboard hotkeys cheat sheet"
+                >
+                  <Keyboard className="h-3.5 w-3.5 text-blue-400" />
+                  <span>Shortcuts</span>
+                </button>
+              </div>
+
+              {/* Editor Preferences: Font Size, Word Wrap, Minimap, Tab Size */}
+              <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                {/* Tab Size Selector */}
+                <button
+                  onClick={() => setTabSize((prev) => (prev === 4 ? 2 : 4))}
+                  className="px-2 py-1 rounded-lg bg-[#131622] border border-slate-800 font-bold text-amber-300 hover:border-amber-500/40 transition-all"
+                  title="Toggle Tab Indent Size (4 spaces PEP 8 vs 2 spaces)"
+                >
+                  Spaces: {tabSize}
+                </button>
+
+                {/* Font Size Adjuster */}
+                <div className="flex items-center gap-1 bg-[#131622] px-2 py-0.5 rounded-lg border border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 mr-0.5">Size:</span>
+                  <button
+                    onClick={() => setFontSize((prev) => Math.max(10, prev - 1))}
+                    className="p-0.5 hover:text-amber-300 transition-colors"
+                    title="Decrease Editor Font Size"
+                  >
+                    <ZoomOut className="h-3 w-3" />
+                  </button>
+                  <span className="font-extrabold text-amber-300 px-1 min-w-[20px] text-center">{fontSize}px</span>
+                  <button
+                    onClick={() => setFontSize((prev) => Math.min(24, prev + 1))}
+                    className="p-0.5 hover:text-amber-300 transition-colors"
+                    title="Increase Editor Font Size"
+                  >
+                    <ZoomIn className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* Word Wrap Toggle */}
+                <button
+                  onClick={() => setWordWrap((prev) => (prev === 'on' ? 'off' : 'on'))}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${
+                    wordWrap === 'on'
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-bold'
+                      : 'bg-[#131622] border-slate-800 text-slate-400'
+                  }`}
+                  title="Toggle Word Wrap"
+                >
+                  <WrapText className="h-3 w-3" />
+                  <span>Wrap</span>
+                </button>
+
+                {/* Minimap Toggle */}
+                <button
+                  onClick={() => setShowMinimap((prev) => !prev)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${
+                    showMinimap
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-bold'
+                      : 'bg-[#131622] border-slate-800 text-slate-400'
+                  }`}
+                  title="Toggle Editor Minimap"
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>Map</span>
+                </button>
+              </div>
+            </div>
+
             {isFormattedToast && (
-              <div className="absolute top-3 right-6 z-20 flex items-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-950/90 backdrop-blur-md px-3 py-1.5 text-xs text-blue-300 shadow-xl animate-fade-in font-mono">
-                <Wand2 className="h-3.5 w-3.5 text-blue-400" />
+              <div className="absolute top-10 right-6 z-20 flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-[#121520] px-3 py-1.5 text-xs text-amber-300 shadow-xl animate-fade-in font-mono">
+                <Wand2 className="h-3.5 w-3.5 text-amber-400" />
                 <span>Python Code Formatted (PEP 8)</span>
               </div>
             )}
 
-            <Editor
-              height="100%"
-              defaultLanguage="python"
-              theme={editorTheme}
-              value={code}
-              onChange={handleCodeChange}
-              onMount={handleEditorDidMount}
-              options={{
-                readOnly: !isOwner,
-                fontSize: 14,
-                glyphMargin: true,
-                minimap: { enabled: true },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 4,
-                fontFamily: "'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
-                fontLigatures: true,
-                cursorBlinking: 'smooth',
-                cursorSmoothCaretAnimation: 'on',
-                renderLineHighlight: 'all',
-                bracketPairColorization: { enabled: true },
+            <div className="flex-1 min-h-0">
+              <Editor
+                height="100%"
+                defaultLanguage="python"
+                theme={editorTheme}
+                value={code}
+                onChange={handleCodeChange}
+                onMount={handleEditorDidMount}
+                options={{
+                  readOnly: !isOwner,
+                  fontSize: fontSize,
+                  wordWrap: wordWrap,
+                  glyphMargin: true,
+                  minimap: { enabled: showMinimap },
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  tabSize: tabSize,
+                  fontFamily: "'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
+                  fontLigatures: true,
+                  cursorBlinking: 'smooth',
+                  cursorSmoothCaretAnimation: 'on',
+                  renderLineHighlight: 'all',
+                  bracketPairColorization: { enabled: true },
                 guides: { indentation: true, bracketPairs: true },
                 smoothScrolling: true,
                 formatOnType: true,
@@ -1056,6 +1357,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                 lineNumbersMinChars: 3,
               }}
             />
+            </div>
           </div>
 
           {/* Console / Terminal Drawer */}
@@ -1421,6 +1723,62 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
           onClose={() => setShowShareModal(false)}
           onTogglePrivacy={onTogglePrivacy}
         />
+      )}
+
+      {/* Clear All Code Confirmation Modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090e]/85 p-4">
+          <Card3D className="w-full max-w-sm p-5 space-y-4" hoverEffect={false}>
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-950/80 border border-red-800/80 text-red-400 shrink-0">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-white">Clear All Code?</h3>
+                <p className="text-xs text-slate-400">Erases all Python lines from editor</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to clear all code in <strong className="text-amber-400 font-mono">{title || 'script.py'}</strong>? You can restore it immediately using the undo banner.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="btn-3d-dark px-3.5 py-1.5 text-xs font-bold text-slate-300 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearAllCode}
+                className="px-4 py-1.5 bg-red-600 hover:bg-red-500 border-b-2 border-red-900 text-white font-extrabold text-xs rounded-xl shadow active:translate-y-[1px] transition-all"
+              >
+                Clear All
+              </button>
+            </div>
+          </Card3D>
+        </div>
+      )}
+
+      {/* Code Snippets Modal */}
+      {showSnippetsModal && (
+        <CodeSnippetsModal
+          onClose={() => setShowSnippetsModal(false)}
+          onInsertCode={(snippetCode) =>
+            handleCodeChange(code ? `${code}\n\n${snippetCode}` : snippetCode)
+          }
+        />
+      )}
+
+      {/* Package Manager Modal */}
+      {showPackagesModal && (
+        <PackageManagerModal onClose={() => setShowPackagesModal(false)} />
+      )}
+
+      {/* Keyboard Shortcuts Modal */}
+      {showShortcutsModal && (
+        <KeyboardShortcutsModal onClose={() => setShowShortcutsModal(false)} />
       )}
 
     </div>
