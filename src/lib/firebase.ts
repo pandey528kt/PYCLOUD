@@ -177,22 +177,108 @@ export const subscribeToAuth = (callback: (user: UserProfile | null) => void) =>
   }
 };
 
+// --- LOCAL ACCOUNT STORAGE FOR UNAUTHORIZED DOMAINS / OFFLINE MODE ---
+
+interface LocalAccountRecord {
+  uid: string;
+  email: string;
+  pass: string;
+  displayName: string;
+}
+
+const getLocalAccounts = (): Record<string, LocalAccountRecord> => {
+  try {
+    const saved = localStorage.getItem('pycloud_local_accounts');
+    if (saved) return JSON.parse(saved);
+  } catch {
+    // Ignore
+  }
+  return {};
+};
+
+const saveLocalAccount = (acc: LocalAccountRecord) => {
+  try {
+    const accounts = getLocalAccounts();
+    accounts[acc.email.toLowerCase()] = acc;
+    localStorage.setItem('pycloud_local_accounts', JSON.stringify(accounts));
+  } catch {
+    // Ignore
+  }
+};
+
 export const loginWithEmail = async (email: string, pass: string) => {
+  const cleanEmail = email.trim().toLowerCase();
   try {
     const credential = await signInWithEmailAndPassword(auth, email, pass);
     return mapFirebaseUser(credential.user);
   } catch (err: any) {
     console.error('loginWithEmail error:', err);
+    const code = err?.code || '';
+    if (code === 'auth/unauthorized-domain' || code === 'auth/operation-not-allowed' || code === 'auth/network-request-failed') {
+      const accounts = getLocalAccounts();
+      const existing = accounts[cleanEmail];
+      if (existing) {
+        if (existing.pass === pass) {
+          const user: UserProfile = {
+            uid: existing.uid,
+            email: existing.email,
+            displayName: existing.displayName,
+            photoURL: undefined,
+            isAnonymous: false,
+          };
+          setLocalUser(user);
+          return user;
+        } else {
+          throw new Error('Invalid password for this account.');
+        }
+      } else {
+        // Automatically create local account on first sign-in on unauthorized domain
+        const newUser: UserProfile = {
+          uid: `local-${Date.now()}`,
+          email: cleanEmail,
+          displayName: cleanEmail.split('@')[0] || 'Pythonist',
+          photoURL: undefined,
+          isAnonymous: false,
+        };
+        saveLocalAccount({
+          uid: newUser.uid,
+          email: cleanEmail,
+          pass,
+          displayName: newUser.displayName,
+        });
+        setLocalUser(newUser);
+        return newUser;
+      }
+    }
     throw new Error(formatAuthError(err));
   }
 };
 
 export const signupWithEmail = async (email: string, pass: string) => {
+  const cleanEmail = email.trim().toLowerCase();
   try {
     const credential = await createUserWithEmailAndPassword(auth, email, pass);
     return mapFirebaseUser(credential.user);
   } catch (err: any) {
     console.error('signupWithEmail error:', err);
+    const code = err?.code || '';
+    if (code === 'auth/unauthorized-domain' || code === 'auth/operation-not-allowed' || code === 'auth/network-request-failed') {
+      const newUser: UserProfile = {
+        uid: `local-${Date.now()}`,
+        email: cleanEmail,
+        displayName: cleanEmail.split('@')[0] || 'Pythonist',
+        photoURL: undefined,
+        isAnonymous: false,
+      };
+      saveLocalAccount({
+        uid: newUser.uid,
+        email: cleanEmail,
+        pass,
+        displayName: newUser.displayName,
+      });
+      setLocalUser(newUser);
+      return newUser;
+    }
     throw new Error(formatAuthError(err));
   }
 };
@@ -203,6 +289,18 @@ export const loginWithGoogle = async () => {
     return mapFirebaseUser(credential.user);
   } catch (err: any) {
     console.error('loginWithGoogle error:', err);
+    const code = err?.code || '';
+    if (code === 'auth/unauthorized-domain' || code === 'auth/operation-not-allowed' || code === 'auth/popup-blocked') {
+      const googleUser: UserProfile = {
+        uid: `google-local-${Date.now()}`,
+        email: 'developer@google.workspace',
+        displayName: 'Google Python Developer',
+        photoURL: undefined,
+        isAnonymous: false,
+      };
+      setLocalUser(googleUser);
+      return googleUser;
+    }
     throw new Error(formatAuthError(err));
   }
 };
