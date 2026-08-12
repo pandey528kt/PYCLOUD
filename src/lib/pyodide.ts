@@ -61,10 +61,18 @@ export const executePythonCode = async (
 ): Promise<ExecutionResult> => {
   const startTime = performance.now();
   let stdoutLogs: string[] = [];
-  let stderrLogs: string[] = [];
 
   try {
     const pyodide = await loadPyodideEngine();
+
+    // Auto-load missing imported packages (e.g., numpy, pandas, matplotlib, scipy, requests, sympy)
+    try {
+      if (pyodide.loadPackagesFromImports) {
+        await pyodide.loadPackagesFromImports(code);
+      }
+    } catch (pkgErr) {
+      console.warn('Pyodide package auto-load note:', pkgErr);
+    }
 
     // Prepare Python environment with standard output redirect
     const pySetup = `
@@ -93,14 +101,8 @@ def custom_input(prompt_text=""):
 
     // Setup custom input callback if requested
     (window as any).handlePythonInput = (promptMsg: string) => {
-      if (onInputRequired) {
-        // Fallback or window prompt if async handled
-        const userInput = window.prompt(promptMsg || 'Python Input:') || '';
-        return userInput;
-      } else {
-        const userInput = window.prompt(promptMsg || 'Python Input:') || '';
-        return userInput;
-      }
+      const userInput = window.prompt(promptMsg || 'Python Input:') || '';
+      return userInput;
     };
 
     // Override sys.stdout & builtins.input in Pyodide
@@ -126,14 +128,128 @@ builtins.input = custom_input
     };
   } catch (err: any) {
     const endTime = performance.now();
-    const errorMsg = err?.message || String(err);
+    let errorMsg = err?.message || String(err);
     const partialOutput = stdoutLogs.join('');
+
+    // Format traceback for clean display
+    if (errorMsg.includes('PythonError:')) {
+      errorMsg = errorMsg.replace(/PythonError: Traceback \(most recent call last\):/g, 'Traceback (most recent call last):');
+    }
 
     return {
       output: partialOutput,
       error: errorMsg,
       executionTimeMs: Math.round(endTime - startTime),
       status: 'error',
+    };
+  }
+};
+
+// --- PYTHON IDLE INTERACTIVE SHELL ENGINE ---
+
+export interface IdleShellEntry {
+  id: string;
+  command: string;
+  output: string;
+  error: string | null;
+  timestamp: string;
+}
+
+let idleNamespaceInitialized = false;
+
+export const IDLE_WELCOME_BANNER = `Python 3.12.0 (pyodide/cpython, PyCloud IDLE Engine v1.0)
+Type "help", "copyright", "credits" or "license" for more information.
+Default libraries loaded: sys, math, os, json, datetime, random, re.
+>>>`;
+
+export const resetIdleEnvironment = async (): Promise<void> => {
+  try {
+    const pyodide = await loadPyodideEngine();
+    await pyodide.runPythonAsync(`
+import sys, io, math, os, json, datetime, random, re
+__idle_globals__ = {
+    'sys': sys,
+    'math': math,
+    'os': os,
+    'json': json,
+    'datetime': datetime,
+    'random': random,
+    're': re,
+    '__name__': '__main__',
+    '__doc__': None,
+}
+`);
+    idleNamespaceInitialized = true;
+  } catch (err) {
+    console.warn('resetIdleEnvironment warning:', err);
+  }
+};
+
+export const executeIdleCommand = async (
+  inputCommand: string
+): Promise<{ output: string; error: string | null }> => {
+  if (!inputCommand.trim()) return { output: '', error: null };
+
+  let stdoutLogs: string[] = [];
+
+  try {
+    const pyodide = await loadPyodideEngine();
+
+    // Auto-load missing packages for IDLE command
+    try {
+      if (pyodide.loadPackagesFromImports) {
+        await pyodide.loadPackagesFromImports(inputCommand);
+      }
+    } catch {
+      // Ignore
+    }
+
+    if (!idleNamespaceInitialized) {
+      await resetIdleEnvironment();
+    }
+
+    pyodide.globals.set('idle_stdout_cb', (text: string) => {
+      stdoutLogs.push(text);
+    });
+
+    const runnerScript = `
+import sys, io, ast
+
+class IdleStdout(io.TextIOBase):
+    def write(self, s):
+        idle_stdout_cb(s)
+        return len(s)
+
+sys.stdout = IdleStdout()
+sys.stderr = IdleStdout()
+
+cmd_str = ${JSON.stringify(inputCommand)}
+
+try:
+    # Try evaluating as expression first to auto-print value (IDLE behavior)
+    parsed = ast.parse(cmd_str, mode='single')
+    compiled = compile(parsed, '<idle_input>', 'single')
+    exec(compiled, __idle_globals__)
+except SyntaxError:
+    exec(cmd_str, __idle_globals__)
+`;
+
+    await pyodide.runPythonAsync(runnerScript);
+
+    const outText = stdoutLogs.join('');
+    return {
+      output: outText,
+      error: null,
+    };
+  } catch (err: any) {
+    let errText = err?.message || String(err);
+    if (errText.includes('PythonError:')) {
+      errText = errText.replace(/PythonError: Traceback \(most recent call last\):/g, 'Traceback:');
+    }
+    const outText = stdoutLogs.join('');
+    return {
+      output: outText,
+      error: errText,
     };
   }
 };
