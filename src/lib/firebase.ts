@@ -89,48 +89,149 @@ export const mapFirebaseUser = (user: FirebaseUser | null): UserProfile | null =
 
 // --- AUTH HELPERS ---
 
+export function formatAuthError(error: any): string {
+  if (!error) return 'Authentication failed. Please try again.';
+  const code = error?.code || '';
+  const message = error?.message || '';
+
+  switch (code) {
+    case 'auth/operation-not-allowed':
+    case 'auth/admin-restricted-operation':
+      return 'This authentication method is disabled in your Firebase console. You can click "Guest Demo" to continue immediately.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Invalid email or password. Please verify your credentials or switch to Sign Up.';
+    case 'auth/email-already-in-use':
+      return 'An account with this email address already exists. Please switch to Sign In.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address format.';
+    case 'auth/weak-password':
+      return 'Password is too weak. Please use at least 6 characters.';
+    case 'auth/popup-closed-by-user':
+      return 'Google sign-in popup was closed before completing.';
+    case 'auth/popup-blocked':
+      return 'Sign-in popup was blocked by your browser. Please allow popups for this site.';
+    case 'auth/unauthorized-domain':
+      return 'This domain is not authorized in your Firebase Auth console settings.';
+    case 'auth/network-request-failed':
+      return 'Network connection issue. Please check your internet connection.';
+    default:
+      if (typeof message === 'string' && message.includes('auth/')) {
+        const cleanMsg = message.replace(/^Firebase:\s*Error\s*\(auth\//i, '').replace(/\)\.?$/i, '').replace(/-/g, ' ');
+        return `Authentication notice: ${cleanMsg}`;
+      }
+      return message || 'Authentication failed. Please try again.';
+  }
+}
+
+export const getLocalUser = (): UserProfile | null => {
+  try {
+    const saved = localStorage.getItem('pycloud_local_user');
+    if (saved) return JSON.parse(saved);
+  } catch {
+    // Ignore
+  }
+  return null;
+};
+
+export const setLocalUser = (user: UserProfile | null) => {
+  try {
+    if (user) {
+      localStorage.setItem('pycloud_local_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('pycloud_local_user');
+    }
+  } catch {
+    // Ignore
+  }
+};
+
 export const subscribeToAuth = (callback: (user: UserProfile | null) => void) => {
   try {
+    const localUser = getLocalUser();
+    if (localUser) {
+      callback(localUser);
+    }
+
     return onAuthStateChanged(
       auth,
       (firebaseUser) => {
-        callback(mapFirebaseUser(firebaseUser));
+        if (firebaseUser) {
+          const mapped = mapFirebaseUser(firebaseUser);
+          setLocalUser(null); // Clear local override when real Firebase user logs in
+          callback(mapped);
+        } else {
+          callback(getLocalUser());
+        }
       },
       (error) => {
-        console.warn('Auth state change error:', error);
-        callback(null);
+        console.warn('Auth state change warning:', error);
+        callback(getLocalUser());
       }
     );
   } catch (err) {
     console.warn('subscribeToAuth exception:', err);
-    callback(null);
+    callback(getLocalUser());
     return () => {};
   }
 };
 
-
 export const loginWithEmail = async (email: string, pass: string) => {
-  const credential = await signInWithEmailAndPassword(auth, email, pass);
-  return mapFirebaseUser(credential.user);
+  try {
+    const credential = await signInWithEmailAndPassword(auth, email, pass);
+    return mapFirebaseUser(credential.user);
+  } catch (err: any) {
+    console.error('loginWithEmail error:', err);
+    throw new Error(formatAuthError(err));
+  }
 };
 
 export const signupWithEmail = async (email: string, pass: string) => {
-  const credential = await createUserWithEmailAndPassword(auth, email, pass);
-  return mapFirebaseUser(credential.user);
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, email, pass);
+    return mapFirebaseUser(credential.user);
+  } catch (err: any) {
+    console.error('signupWithEmail error:', err);
+    throw new Error(formatAuthError(err));
+  }
 };
 
 export const loginWithGoogle = async () => {
-  const credential = await signInWithPopup(auth, googleProvider);
-  return mapFirebaseUser(credential.user);
+  try {
+    const credential = await signInWithPopup(auth, googleProvider);
+    return mapFirebaseUser(credential.user);
+  } catch (err: any) {
+    console.error('loginWithGoogle error:', err);
+    throw new Error(formatAuthError(err));
+  }
 };
 
 export const loginAsGuest = async () => {
-  const credential = await signInAnonymously(auth);
-  return mapFirebaseUser(credential.user);
+  try {
+    const credential = await signInAnonymously(auth);
+    return mapFirebaseUser(credential.user);
+  } catch (err: any) {
+    console.warn('signInAnonymously failed, falling back to local guest session:', err);
+    const guestUser: UserProfile = {
+      uid: `guest-local-${Date.now()}`,
+      email: 'guest@pycloud.workspace',
+      displayName: 'Guest Pythonist',
+      photoURL: undefined,
+      isAnonymous: true,
+    };
+    setLocalUser(guestUser);
+    return guestUser;
+  }
 };
 
 export const logoutUser = async () => {
-  await signOut(auth);
+  setLocalUser(null);
+  try {
+    await signOut(auth);
+  } catch {
+    // Ignore
+  }
 };
 
 export const updateUserPassword = async (newPassword: string) => {

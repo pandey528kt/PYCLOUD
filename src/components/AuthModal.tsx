@@ -91,9 +91,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
 
         {/* Error Alert */}
         {error && (
-          <div className="flex items-start gap-2.5 rounded-xl border border-red-900/60 bg-red-950/60 p-3 text-xs text-red-300">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
-            <span>{error}</span>
+          <div className="rounded-xl border border-red-900/60 bg-red-950/60 p-3 space-y-2">
+            <div className="flex items-start gap-2.5 text-xs text-red-300">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+              <span className="leading-relaxed">{error}</span>
+            </div>
+            {(error.includes('disabled') || error.includes('Guest') || error.includes('console')) && (
+              <button
+                type="button"
+                onClick={handleGuestAuth}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-900/40 py-1.5 text-[11px] font-semibold text-blue-300 hover:bg-blue-900/60 transition-all mt-1"
+              >
+                <UserIcon className="h-3.5 w-3.5" />
+                <span>Continue instantly as Guest Pythonist</span>
+              </button>
+            )}
           </div>
         )}
 
