@@ -124,35 +124,17 @@ export default function App() {
     const ownerEmail = user?.email || 'guest@pycloud.io';
     const ownerName = user?.displayName || 'Guest User';
 
-    if (user && !user.isAnonymous) {
-      const newProj = await createProjectInDb({
-        title,
-        code,
-        ownerId,
-        ownerEmail,
-        ownerName,
-        privacy,
-        isShared: privacy === 'shared',
-      });
-      setProjects((prev) => [newProj, ...prev]);
-      setActiveProject(newProj);
-    } else {
-      const localProj: Project = {
-        id: `proj-${Date.now()}`,
-        title,
-        code,
-        ownerId,
-        ownerEmail,
-        ownerName,
-        privacy,
-        isShared: privacy === 'shared',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setProjects((prev) => [localProj, ...prev]);
-      setActiveProject(localProj);
-    }
-
+    const newProj = await createProjectInDb({
+      title,
+      code,
+      ownerId,
+      ownerEmail,
+      ownerName,
+      privacy,
+      isShared: privacy === 'shared',
+    });
+    setProjects((prev) => [newProj, ...prev]);
+    setActiveProject(newProj);
     setActiveTab('editor');
   };
 
@@ -165,8 +147,8 @@ export default function App() {
       setActiveProject((prev) => (prev ? { ...prev, code: newCode, updatedAt: new Date().toISOString() } : null));
     }
 
-    if (user && !user.isAnonymous) {
-      await updateProjectInDb(projectId, { code: newCode });
+    if (user) {
+      await updateProjectInDb(projectId, { code: newCode }, user.uid);
     }
   };
 
@@ -179,8 +161,8 @@ export default function App() {
       setActiveProject((prev) => (prev ? { ...prev, title: newTitle, updatedAt: new Date().toISOString() } : null));
     }
 
-    if (user && !user.isAnonymous) {
-      await updateProjectInDb(projectId, { title: newTitle });
+    if (user) {
+      await updateProjectInDb(projectId, { title: newTitle }, user.uid);
     }
   };
 
@@ -192,8 +174,8 @@ export default function App() {
       setActiveProject(remaining.length > 0 ? remaining[0] : null);
     }
 
-    if (user && !user.isAnonymous) {
-      await deleteProjectFromDb(projectId);
+    if (user) {
+      await deleteProjectFromDb(projectId, user.uid);
     }
   };
 
@@ -212,8 +194,8 @@ export default function App() {
       );
     }
 
-    if (user && !user.isAnonymous) {
-      await updateProjectInDb(projectId, { privacy: nextPrivacy, isShared: nextPrivacy === 'shared' });
+    if (user) {
+      await updateProjectInDb(projectId, { privacy: nextPrivacy, isShared: nextPrivacy === 'shared' }, user.uid);
     }
   };
 

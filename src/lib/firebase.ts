@@ -135,6 +135,8 @@ export const getLocalUser = (): UserProfile | null => {
   return null;
 };
 
+const authSubscribers: Array<(user: UserProfile | null) => void> = [];
+
 export const setLocalUser = (user: UserProfile | null) => {
   try {
     if (user) {
@@ -145,16 +147,22 @@ export const setLocalUser = (user: UserProfile | null) => {
   } catch {
     // Ignore
   }
+  authSubscribers.forEach((cb) => cb(user));
 };
 
 export const subscribeToAuth = (callback: (user: UserProfile | null) => void) => {
-  try {
-    const localUser = getLocalUser();
-    if (localUser) {
-      callback(localUser);
-    }
+  authSubscribers.push(callback);
+  
+  // Immediately emit current local user or null
+  const currentLocal = getLocalUser();
+  if (currentLocal) {
+    callback(currentLocal);
+  }
 
-    return onAuthStateChanged(
+  let unsubscribeFirebase: (() => void) | null = null;
+
+  try {
+    unsubscribeFirebase = onAuthStateChanged(
       auth,
       (firebaseUser) => {
         if (firebaseUser) {
@@ -173,8 +181,13 @@ export const subscribeToAuth = (callback: (user: UserProfile | null) => void) =>
   } catch (err) {
     console.warn('subscribeToAuth exception:', err);
     callback(getLocalUser());
-    return () => {};
   }
+
+  return () => {
+    const idx = authSubscribers.indexOf(callback);
+    if (idx !== -1) authSubscribers.splice(idx, 1);
+    if (unsubscribeFirebase) unsubscribeFirebase();
+  };
 };
 
 // --- LOCAL ACCOUNT STORAGE FOR UNAUTHORIZED DOMAINS / OFFLINE MODE ---
@@ -348,10 +361,34 @@ export const deleteAccount = async () => {
   }
 };
 
+// --- LOCAL PROJECTS FALLBACK STORAGE ---
+
+const getLocalProjectsStorage = (userId: string): Project[] => {
+  try {
+    const raw = localStorage.getItem(`pycloud_projects_${userId}`);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // Ignore
+  }
+  return [];
+};
+
+const saveLocalProjectsStorage = (userId: string, projects: Project[]) => {
+  try {
+    localStorage.setItem(`pycloud_projects_${userId}`, JSON.stringify(projects));
+  } catch {
+    // Ignore
+  }
+};
+
 // --- FIRESTORE PROJECT HELPERS ---
 
 // Get all projects owned by user
 export const getUserProjects = async (userId: string): Promise<Project[]> => {
+  if (userId.includes('local') || userId.startsWith('guest-')) {
+    return getLocalProjectsStorage(userId);
+  }
+
   try {
     const q = query(
       collection(db, 'projects'),
@@ -376,11 +413,15 @@ export const getUserProjects = async (userId: string): Promise<Project[]> => {
         tags: data.tags || [],
       });
     });
-    // Sort in memory by updatedAt desc
-    return projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const sorted = projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    if (sorted.length === 0) {
+      const local = getLocalProjectsStorage(userId);
+      if (local.length > 0) return local;
+    }
+    return sorted;
   } catch (err) {
-    console.error('Error fetching user projects from Firestore:', err);
-    throw err;
+    console.warn('Error fetching user projects from Firestore, falling back to local storage:', err);
+    return getLocalProjectsStorage(userId);
   }
 };
 
@@ -408,8 +449,8 @@ export const getProjectById = async (projectId: string): Promise<Project | null>
       tags: data.tags || [],
     };
   } catch (err) {
-    console.error(`Error fetching project ${projectId}:`, err);
-    throw err;
+    console.warn(`Error fetching project ${projectId}:`, err);
+    return null;
   }
 };
 
@@ -424,38 +465,85 @@ export const createProjectInDb = async (
     updatedAt: now,
     isShared: projectData.privacy === 'shared',
   };
-  
-  const docRef = await addDoc(collection(db, 'projects'), payload);
-  return {
-    ...payload,
-    id: docRef.id,
-  };
+
+  if (projectData.ownerId.includes('local') || projectData.ownerId.startsWith('guest-')) {
+    const newProject: Project = {
+      ...payload,
+      id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    };
+    const local = getLocalProjectsStorage(projectData.ownerId);
+    const updated = [newProject, ...local];
+    saveLocalProjectsStorage(projectData.ownerId, updated);
+    return newProject;
+  }
+
+  try {
+    const docRef = await addDoc(collection(db, 'projects'), payload);
+    const newProject = {
+      ...payload,
+      id: docRef.id,
+    };
+    const local = getLocalProjectsStorage(projectData.ownerId);
+    saveLocalProjectsStorage(projectData.ownerId, [newProject, ...local]);
+    return newProject;
+  } catch (err) {
+    console.warn('Firestore createProject failed, saving locally:', err);
+    const newProject: Project = {
+      ...payload,
+      id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    };
+    const local = getLocalProjectsStorage(projectData.ownerId);
+    const updated = [newProject, ...local];
+    saveLocalProjectsStorage(projectData.ownerId, updated);
+    return newProject;
+  }
 };
 
 // Update project (code, title, privacy, tags)
 export const updateProjectInDb = async (
   projectId: string,
-  updates: Partial<Omit<Project, 'id' | 'ownerId'>>
+  updates: Partial<Omit<Project, 'id' | 'ownerId'>>,
+  ownerId?: string
 ): Promise<void> => {
-  const docRef = doc(db, 'projects', projectId);
   const now = new Date().toISOString();
-  
-  const updatePayload: Record<string, any> = {
-    ...updates,
-    updatedAt: now,
-  };
 
-  if (updates.privacy) {
-    updatePayload.isShared = updates.privacy === 'shared';
+  if (ownerId) {
+    const local = getLocalProjectsStorage(ownerId);
+    const updatedList = local.map((p) => (p.id === projectId ? { ...p, ...updates, updatedAt: now } : p));
+    saveLocalProjectsStorage(ownerId, updatedList);
   }
 
-  await updateDoc(docRef, updatePayload);
+  try {
+    const docRef = doc(db, 'projects', projectId);
+    const updatePayload: Record<string, any> = {
+      ...updates,
+      updatedAt: now,
+    };
+
+    if (updates.privacy) {
+      updatePayload.isShared = updates.privacy === 'shared';
+    }
+
+    await updateDoc(docRef, updatePayload);
+  } catch (err) {
+    console.warn('Firestore updateProject failed:', err);
+  }
 };
 
 // Delete project
-export const deleteProjectFromDb = async (projectId: string): Promise<void> => {
-  const docRef = doc(db, 'projects', projectId);
-  await deleteDoc(docRef);
+export const deleteProjectFromDb = async (projectId: string, ownerId?: string): Promise<void> => {
+  if (ownerId) {
+    const local = getLocalProjectsStorage(ownerId);
+    const filtered = local.filter((p) => p.id !== projectId);
+    saveLocalProjectsStorage(ownerId, filtered);
+  }
+
+  try {
+    const docRef = doc(db, 'projects', projectId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('Firestore deleteProject failed:', err);
+  }
 };
 
 // --- VERSION HISTORY HELPERS ---
