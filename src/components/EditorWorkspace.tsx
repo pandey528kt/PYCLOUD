@@ -31,6 +31,7 @@ import {
   executePythonCode,
   executeIdleCommand,
   resetIdleEnvironment,
+  getIdleVariables,
   IDLE_WELCOME_BANNER,
 } from '../lib/pyodide';
 import { formatPythonCode } from '../lib/pythonFormatter';
@@ -77,6 +78,16 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   const [isFormattedToast, setIsFormattedToast] = useState(false);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(true);
 
+  // Workspace Execution Mode: Script Mode (.py Editor) vs Interactive Mode (Python IDLE Shell)
+  const [workspaceMode, setWorkspaceMode] = useState<'script' | 'interactive'>('script');
+  const [idleVariables, setIdleVariables] = useState<Array<{ name: string; type: string; value: string }>>([]);
+
+  // Refresh variables in IDLE environment
+  const refreshIdleVars = useCallback(async () => {
+    const vars = await getIdleVariables();
+    setIdleVariables(vars);
+  }, []);
+
   // Python IDLE Interactive Shell State
   const [consoleTab, setConsoleTab] = useState<'terminal' | 'idle'>('idle'); // Python IDLE active by default
   const [idleLogs, setIdleLogs] = useState<Array<{ id: string; type: 'banner' | 'cmd' | 'out' | 'err'; text: string }>>([
@@ -90,10 +101,10 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
 
   // Auto-scroll IDLE shell console
   useEffect(() => {
-    if (consoleTab === 'idle' && isConsoleExpanded) {
+    if ((consoleTab === 'idle' || workspaceMode === 'interactive') && isConsoleExpanded) {
       idleConsoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [idleLogs, consoleTab, isConsoleExpanded]);
+  }, [idleLogs, consoleTab, workspaceMode, isConsoleExpanded]);
 
   // IDLE Command Submit Handler
   const handleIdleSubmit = async (e?: React.FormEvent) => {
@@ -117,6 +128,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
       setIdleLogs((prev) => [...prev, { id: `err-${Date.now()}`, type: 'err', text: res.error }]);
     }
     setIsIdleRunning(false);
+    refreshIdleVars();
   };
 
   // History Navigation with Up/Down Arrow
@@ -458,235 +470,473 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Main Workspace Split: Monaco Code Editor + Output Console */}
-      <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
-        
-        {/* Monaco Editor Container */}
-        <div className="flex-1 min-h-0 bg-[#050505] relative">
-          {isFormattedToast && (
-            <div className="absolute top-3 right-6 z-20 flex items-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-950/90 backdrop-blur-md px-3 py-1.5 text-xs text-blue-300 shadow-xl animate-fade-in font-mono">
-              <Wand2 className="h-3.5 w-3.5 text-blue-400" />
-              <span>Python Code Formatted (PEP 8)</span>
-            </div>
-          )}
+      {/* Workspace Sub-Header: Execution Mode Selector */}
+      <div className="flex items-center justify-between border-b border-white/5 bg-[#060608] px-4 py-1.5 text-xs font-mono select-none">
+        <div className="flex items-center gap-2">
+          <span className="text-gray-400 font-medium text-[11px] uppercase tracking-wider hidden sm:inline">Execution Mode:</span>
+          <div className="flex items-center bg-[#0d0d12] p-0.5 rounded-xl border border-white/10 shadow-inner">
+            <button
+              onClick={() => setWorkspaceMode('script')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                workspaceMode === 'script'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+              }`}
+              title="Script Mode: Multi-line Python file editor and full output runner"
+            >
+              <Code2 className="h-3.5 w-3.5" />
+              <span>Script Mode (.py)</span>
+            </button>
 
-          <Editor
-            height="100%"
-            defaultLanguage="python"
-            theme="vs-dark"
-            value={code}
-            onChange={handleCodeChange}
-            onMount={handleEditorDidMount}
-            options={{
-              readOnly: !isOwner,
-              fontSize: 14,
-              minimap: { enabled: true },
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              tabSize: 4,
-              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-              padding: { top: 12, bottom: 12 },
-              lineNumbersMinChars: 3,
-            }}
-          />
+            <button
+              onClick={() => {
+                setWorkspaceMode('interactive');
+                refreshIdleVars();
+              }}
+              className={`flex items-center gap-2 px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                workspaceMode === 'interactive'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+              }`}
+              title="Interactive Mode: Python IDLE line-by-line REPL shell"
+            >
+              <Cpu className="h-3.5 w-3.5 text-emerald-300" />
+              <span>Interactive Mode (IDLE Shell)</span>
+            </button>
+          </div>
         </div>
 
-        {/* Console / Terminal Drawer */}
-        <div
-          className={`border-t md:border-t-0 md:border-l border-white/5 bg-[#050505] flex flex-col transition-all duration-300 ${
-            isConsoleExpanded ? 'h-80 md:h-auto md:w-[450px]' : 'h-10 md:h-auto md:w-12'
-          }`}
-        >
-          {/* Console Header Bar with Tabs */}
-          <div
-            className="flex items-center justify-between border-b border-white/5 bg-[#08080a] px-3 py-1.5 select-none text-xs font-mono"
-          >
-            {/* Tab Switcher */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => {
-                  setConsoleTab('idle');
-                  if (!isConsoleExpanded) setIsConsoleExpanded(true);
-                }}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  consoleTab === 'idle'
-                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                }`}
-                title="Interactive Python IDLE REPL Shell"
-              >
-                <Cpu className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Python IDLE Shell</span>
-              </button>
+        <div className="flex items-center gap-2 text-[11px] text-gray-400">
+          {workspaceMode === 'script' ? (
+            <span className="hidden md:inline text-blue-300/80">
+              💡 Write script &amp; click <strong>Run Code</strong> or press <strong>Ctrl+Enter</strong>
+            </span>
+          ) : (
+            <span className="hidden md:inline text-emerald-300/80">
+              ⚡ Live IDLE REPL: Type Python commands &amp; press <strong>Enter</strong>
+            </span>
+          )}
+        </div>
+      </div>
 
+      {/* Main Workspace Area: Mode Conditioned */}
+      {workspaceMode === 'interactive' ? (
+        /* FULL INTERACTIVE MODE VIEW */
+        <div className="flex-1 flex flex-col md:flex-row min-h-0 bg-[#030303] relative">
+          
+          {/* Main IDLE Shell Window */}
+          <div className="flex-1 flex flex-col min-h-0 border-r border-white/5">
+            {/* IDLE Shell Top Bar */}
+            <div className="flex items-center justify-between border-b border-white/5 bg-[#08080a] px-4 py-2 text-xs font-mono">
+              <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                <Cpu className="h-4 w-4 text-emerald-400" />
+                <span>Python 3.12 IDLE Shell (Interactive REPL)</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    handleIdleSubmit();
+                  }}
+                  onClickCapture={handleResetIdle}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-emerald-300 transition-all text-xs"
+                  title="Reset IDLE Session"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Reset IDLE</span>
+                </button>
+
+                <button
+                  onClick={() =>
+                    setIdleLogs([{ id: 'banner', type: 'banner', text: IDLE_WELCOME_BANNER }])
+                  }
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-red-300 transition-all text-xs"
+                  title="Clear Shell Screen"
+                >
+                  <Trash className="h-3.5 w-3.5" />
+                  <span>Clear Screen</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Sample Snippets Bar */}
+            <div className="flex items-center gap-2 border-b border-white/5 bg-[#050508] px-4 py-1.5 text-xs overflow-x-auto scrollbar-none">
+              <span className="text-gray-500 font-mono text-[10px] shrink-0">Quick Presets:</span>
+              {[
+                { label: 'math.sqrt(144)', cmd: 'import math\nmath.sqrt(144)' },
+                { label: 'list comprehension', cmd: '[x**2 for x in range(10)]' },
+                { label: 'dict preview', cmd: '{"lang": "Python", "version": 3.12, "mode": "IDLE"}' },
+                { label: 'numpy array', cmd: 'import numpy as np\nnp.array([1, 2, 3, 4])' },
+                { label: 'datetime.now()', cmd: 'from datetime import datetime\ndatetime.now().isoformat()' },
+              ].map((preset, idx) => (
+                <button
+                  key={idx}
+                  onClick={async () => {
+                    setIdleLogs((prev) => [...prev, { id: `preset-${Date.now()}`, type: 'cmd', text: `>>> ${preset.cmd}` }]);
+                    setIsIdleRunning(true);
+                    const res = await executeIdleCommand(preset.cmd);
+                    if (res.output) {
+                      setIdleLogs((prev) => [...prev, { id: `out-${Date.now()}`, type: 'out', text: res.output }]);
+                    }
+                    if (res.error) {
+                      setIdleLogs((prev) => [...prev, { id: `err-${Date.now()}`, type: 'err', text: res.error }]);
+                    }
+                    setIsIdleRunning(false);
+                    refreshIdleVars();
+                  }}
+                  className="shrink-0 px-2.5 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/60 transition-all font-mono text-[11px]"
+                >
+                  + {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {/* IDLE Shell Logs Container */}
+            <div className="flex-1 p-4 font-mono text-xs overflow-auto leading-relaxed select-text space-y-2 scrollbar-thin bg-[#020203]">
+              {idleLogs.map((log) => {
+                if (log.type === 'banner') {
+                  return (
+                    <div key={log.id} className="text-emerald-400/90 whitespace-pre-wrap font-semibold pb-2 border-b border-emerald-900/30 leading-normal">
+                      {log.text}
+                    </div>
+                  );
+                }
+                if (log.type === 'cmd') {
+                  return (
+                    <div key={log.id} className="text-cyan-300 font-bold whitespace-pre-wrap pt-1">
+                      {log.text}
+                    </div>
+                  );
+                }
+                if (log.type === 'err') {
+                  return (
+                    <div key={log.id} className="text-red-400 whitespace-pre-wrap pl-3 border-l-2 border-red-500/60 my-1 bg-red-950/20 py-1">
+                      {log.text}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={log.id} className="text-blue-300/90 whitespace-pre-wrap pl-3 font-semibold">
+                    {log.text}
+                  </div>
+                );
+              })}
+
+              {isIdleRunning && (
+                <div className="flex items-center gap-2 text-emerald-400 animate-pulse text-xs py-1">
+                  <Sparkles className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                  <span>Evaluating Python IDLE expression...</span>
+                </div>
+              )}
+              <div ref={idleConsoleEndRef} />
+            </div>
+
+            {/* Interactive Prompt Input */}
+            <form
+              onSubmit={handleIdleSubmit}
+              className="flex items-center gap-3 border-t border-white/10 bg-[#07070a] px-4 py-3 shadow-lg"
+            >
+              <span className="text-emerald-400 font-mono font-bold text-sm select-none">&gt;&gt;&gt;</span>
+              <input
+                type="text"
+                value={idleInput}
+                onChange={(e) => setIdleInput(e.target.value)}
+                onKeyDown={handleIdleKeyDown}
+                placeholder="Type Python code (e.g. x = 10, print(x*2), import sys) [Enter]"
+                disabled={isIdleRunning}
+                className="flex-1 bg-transparent font-mono text-xs text-gray-100 placeholder-gray-500 focus:outline-none"
+                autoFocus
+              />
               <button
-                onClick={() => {
-                  setConsoleTab('terminal');
-                  if (!isConsoleExpanded) setIsConsoleExpanded(true);
-                }}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  consoleTab === 'terminal'
-                    ? 'bg-blue-950/80 text-blue-300 border border-blue-500/40 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                }`}
-                title="Program Output Log"
+                type="submit"
+                disabled={!idleInput.trim() || isIdleRunning}
+                className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-1.5 text-xs font-bold text-white shadow-md hover:brightness-110 disabled:opacity-40 transition-all flex items-center gap-1.5"
               >
-                <TerminalIcon className="h-3.5 w-3.5 text-blue-400" />
-                <span>Program Output</span>
-                {executionResult.status === 'success' && (
-                  <span className="text-[10px] text-blue-400 bg-blue-950/80 border border-blue-800/60 px-1 rounded">
-                    {executionResult.executionTimeMs}ms
-                  </span>
-                )}
+                <CornerDownLeft className="h-3.5 w-3.5" />
+                <span>Execute</span>
+              </button>
+            </form>
+          </div>
+
+          {/* Interactive Variables & Environment Panel */}
+          <div className="w-full md:w-72 bg-[#060608] border-t md:border-t-0 md:border-l border-white/5 p-4 flex flex-col gap-3 font-mono text-xs overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-white/5 pb-2">
+              <span className="font-bold text-gray-200 flex items-center gap-1.5">
+                <Code2 className="h-4 w-4 text-emerald-400" />
+                <span>Variable Inspector</span>
+              </span>
+              <button
+                onClick={refreshIdleVars}
+                className="p-1 rounded text-gray-400 hover:text-emerald-300 hover:bg-white/5 transition-colors"
+                title="Refresh variables list"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
               </button>
             </div>
 
-            {/* Header Right Actions */}
-            <div className="flex items-center gap-1">
-              {consoleTab === 'idle' ? (
-                <>
-                  <button
-                    onClick={handleResetIdle}
-                    className="rounded p-1 text-gray-400 hover:text-emerald-300 hover:bg-white/5 transition-colors"
-                    title="Reset IDLE Python REPL Namespace"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() =>
-                      setIdleLogs([{ id: 'banner', type: 'banner', text: IDLE_WELCOME_BANNER }])
-                    }
-                    className="rounded p-1 text-gray-400 hover:text-red-300 hover:bg-white/5 transition-colors"
-                    title="Clear IDLE Shell Screen"
-                  >
-                    <Trash className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() =>
-                    setExecutionResult({ output: '', error: null, executionTimeMs: 0, status: 'idle' })
-                  }
-                  className="rounded p-1 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
-                  title="Clear program output"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+            {idleVariables.length === 0 ? (
+              <div className="text-gray-500 text-[11px] leading-relaxed italic bg-[#030304] p-3 rounded-xl border border-white/5 text-center">
+                No custom variables defined yet. Execute commands like <code>x = 42</code> to inspect them here.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {idleVariables.map((v, i) => (
+                  <div key={i} className="p-2.5 rounded-xl border border-white/5 bg-[#030304] space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-300">{v.name}</span>
+                      <span className="text-[10px] text-gray-400 bg-white/5 px-1.5 py-0.5 rounded">{v.type}</span>
+                    </div>
+                    <div className="text-gray-300 text-[11px] break-all font-mono bg-[#010102] p-1.5 rounded border border-white/5">
+                      {v.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
+            {/* Quick Switch Button back to Script Mode */}
+            <div className="mt-auto pt-4 border-t border-white/5">
               <button
-                onClick={() => setIsConsoleExpanded(!isConsoleExpanded)}
-                className="rounded p-1 text-gray-400 hover:text-gray-200 transition-colors"
+                onClick={() => setWorkspaceMode('script')}
+                className="w-full py-2 px-3 rounded-xl border border-blue-500/30 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60 font-semibold text-xs transition-all flex items-center justify-center gap-2"
               >
-                {isConsoleExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                <Code2 className="h-4 w-4" />
+                <span>Switch to Script Editor (.py)</span>
               </button>
             </div>
           </div>
 
-          {/* Console Content Area */}
-          {isConsoleExpanded && (
-            <div className="flex-1 flex flex-col min-h-0 bg-[#030303] overflow-hidden">
-              
-              {/* TAB 1: PYTHON IDLE SHELL */}
-              {consoleTab === 'idle' && (
-                <div className="flex-1 flex flex-col min-h-0">
-                  {/* IDLE Log Output Container */}
-                  <div className="flex-1 p-3 font-mono text-xs overflow-auto leading-relaxed select-text space-y-1.5 scrollbar-thin">
-                    {idleLogs.map((log) => {
-                      if (log.type === 'banner') {
-                        return (
-                          <div key={log.id} className="text-emerald-400/90 whitespace-pre-wrap font-semibold pb-1 border-b border-emerald-900/30">
-                            {log.text}
-                          </div>
-                        );
-                      }
-                      if (log.type === 'cmd') {
-                        return (
-                          <div key={log.id} className="text-cyan-300 font-bold whitespace-pre-wrap pt-1">
-                            {log.text}
-                          </div>
-                        );
-                      }
-                      if (log.type === 'err') {
-                        return (
-                          <div key={log.id} className="text-red-400 whitespace-pre-wrap pl-2 border-l-2 border-red-500/50">
-                            {log.text}
-                          </div>
-                        );
-                      }
-                      return (
-                        <div key={log.id} className="text-blue-300/90 whitespace-pre-wrap pl-2">
-                          {log.text}
-                        </div>
-                      );
-                    })}
+        </div>
+      ) : (
+        /* SCRIPT MODE (.py FILE EDITOR) VIEW */
+        <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
+          
+          {/* Monaco Editor Container */}
+          <div className="flex-1 min-h-0 bg-[#050505] relative">
+            {isFormattedToast && (
+              <div className="absolute top-3 right-6 z-20 flex items-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-950/90 backdrop-blur-md px-3 py-1.5 text-xs text-blue-300 shadow-xl animate-fade-in font-mono">
+                <Wand2 className="h-3.5 w-3.5 text-blue-400" />
+                <span>Python Code Formatted (PEP 8)</span>
+              </div>
+            )}
 
-                    {isIdleRunning && (
-                      <div className="flex items-center gap-2 text-emerald-400 animate-pulse text-xs py-1">
-                        <Sparkles className="h-3.5 w-3.5 animate-spin" />
-                        <span>Evaluating in Python IDLE CPython engine...</span>
+            <Editor
+              height="100%"
+              defaultLanguage="python"
+              theme="vs-dark"
+              value={code}
+              onChange={handleCodeChange}
+              onMount={handleEditorDidMount}
+              options={{
+                readOnly: !isOwner,
+                fontSize: 14,
+                minimap: { enabled: true },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 4,
+                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                padding: { top: 12, bottom: 12 },
+                lineNumbersMinChars: 3,
+              }}
+            />
+          </div>
+
+          {/* Console / Terminal Drawer */}
+          <div
+            className={`border-t md:border-t-0 md:border-l border-white/5 bg-[#050505] flex flex-col transition-all duration-300 ${
+              isConsoleExpanded ? 'h-80 md:h-auto md:w-[450px]' : 'h-10 md:h-auto md:w-12'
+            }`}
+          >
+            {/* Console Header Bar with Tabs */}
+            <div
+              className="flex items-center justify-between border-b border-white/5 bg-[#08080a] px-3 py-1.5 select-none text-xs font-mono"
+            >
+              {/* Tab Switcher */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setConsoleTab('terminal');
+                    if (!isConsoleExpanded) setIsConsoleExpanded(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    consoleTab === 'terminal'
+                      ? 'bg-blue-950/80 text-blue-300 border border-blue-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                  title="Program Output Log"
+                >
+                  <TerminalIcon className="h-3.5 w-3.5 text-blue-400" />
+                  <span>Program Output</span>
+                  {executionResult.status === 'success' && (
+                    <span className="text-[10px] text-blue-400 bg-blue-950/80 border border-blue-800/60 px-1 rounded">
+                      {executionResult.executionTimeMs}ms
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setConsoleTab('idle');
+                    if (!isConsoleExpanded) setIsConsoleExpanded(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    consoleTab === 'idle'
+                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                  title="Interactive Python IDLE REPL Shell"
+                >
+                  <Cpu className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>IDLE REPL</span>
+                </button>
+              </div>
+
+              {/* Header Right Actions */}
+              <div className="flex items-center gap-1">
+                {consoleTab === 'idle' ? (
+                  <>
+                    <button
+                      onClick={handleResetIdle}
+                      className="rounded p-1 text-gray-400 hover:text-emerald-300 hover:bg-white/5 transition-colors"
+                      title="Reset IDLE Python REPL Namespace"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() =>
+                        setIdleLogs([{ id: 'banner', type: 'banner', text: IDLE_WELCOME_BANNER }])
+                      }
+                      className="rounded p-1 text-gray-400 hover:text-red-300 hover:bg-white/5 transition-colors"
+                      title="Clear IDLE Shell Screen"
+                    >
+                      <Trash className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() =>
+                      setExecutionResult({ output: '', error: null, executionTimeMs: 0, status: 'idle' })
+                    }
+                    className="rounded p-1 text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+                    title="Clear program output"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setIsConsoleExpanded(!isConsoleExpanded)}
+                  className="rounded p-1 text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  {isConsoleExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Console Content Area */}
+            {isConsoleExpanded && (
+              <div className="flex-1 flex flex-col min-h-0 bg-[#030303] overflow-hidden">
+                
+                {/* TAB 1: SCRIPT PROGRAM OUTPUT */}
+                {consoleTab === 'terminal' && (
+                  <div className="flex-1 p-3 font-mono text-xs overflow-auto leading-relaxed select-text bg-[#030303]">
+                    {executionResult.status === 'running' && (
+                      <div className="flex items-center gap-2 text-blue-400 animate-pulse">
+                        <Sparkles className="h-4 w-4 animate-spin" />
+                        <span>Running Python WebAssembly code...</span>
                       </div>
                     )}
-                    <div ref={idleConsoleEndRef} />
+
+                    {executionResult.error ? (
+                      <div className="text-red-400 whitespace-pre-wrap">
+                        <p className="font-bold border-b border-red-900/50 pb-1 mb-2 text-red-300">
+                          Traceback / Execution Error:
+                        </p>
+                        {executionResult.error}
+                      </div>
+                    ) : (
+                      <pre className="text-blue-300/90 whitespace-pre-wrap break-words">
+                        {executionResult.output}
+                      </pre>
+                    )}
                   </div>
+                )}
 
-                  {/* IDLE Input Prompt Form */}
-                  <form
-                    onSubmit={handleIdleSubmit}
-                    className="flex items-center gap-2 border-t border-white/5 bg-[#08080a] px-3 py-2"
-                  >
-                    <span className="text-emerald-400 font-mono font-bold text-xs select-none">&gt;&gt;&gt;</span>
-                    <input
-                      type="text"
-                      value={idleInput}
-                      onChange={(e) => setIdleInput(e.target.value)}
-                      onKeyDown={handleIdleKeyDown}
-                      placeholder="Type Python code (e.g., 2+2, import numpy, help()) [Enter]"
-                      disabled={isIdleRunning}
-                      className="flex-1 bg-transparent font-mono text-xs text-gray-100 placeholder-gray-600 focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!idleInput.trim() || isIdleRunning}
-                      className="rounded-lg bg-emerald-900/60 border border-emerald-600/40 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-800/80 disabled:opacity-40 transition-all flex items-center gap-1"
+                {/* TAB 2: PYTHON IDLE SHELL */}
+                {consoleTab === 'idle' && (
+                  <div className="flex-1 flex flex-col min-h-0">
+                    {/* IDLE Log Output Container */}
+                    <div className="flex-1 p-3 font-mono text-xs overflow-auto leading-relaxed select-text space-y-1.5 scrollbar-thin">
+                      {idleLogs.map((log) => {
+                        if (log.type === 'banner') {
+                          return (
+                            <div key={log.id} className="text-emerald-400/90 whitespace-pre-wrap font-semibold pb-1 border-b border-emerald-900/30">
+                              {log.text}
+                            </div>
+                          );
+                        }
+                        if (log.type === 'cmd') {
+                          return (
+                            <div key={log.id} className="text-cyan-300 font-bold whitespace-pre-wrap pt-1">
+                              {log.text}
+                            </div>
+                          );
+                        }
+                        if (log.type === 'err') {
+                          return (
+                            <div key={log.id} className="text-red-400 whitespace-pre-wrap pl-2 border-l-2 border-red-500/50">
+                              {log.text}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={log.id} className="text-blue-300/90 whitespace-pre-wrap pl-2">
+                            {log.text}
+                          </div>
+                        );
+                      })}
+
+                      {isIdleRunning && (
+                        <div className="flex items-center gap-2 text-emerald-400 animate-pulse text-xs py-1">
+                          <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                          <span>Evaluating in Python IDLE CPython engine...</span>
+                        </div>
+                      )}
+                      <div ref={idleConsoleEndRef} />
+                    </div>
+
+                    {/* IDLE Input Prompt Form */}
+                    <form
+                      onSubmit={handleIdleSubmit}
+                      className="flex items-center gap-2 border-t border-white/5 bg-[#08080a] px-3 py-2"
                     >
-                      <CornerDownLeft className="h-3 w-3" />
-                      <span>Run</span>
-                    </button>
-                  </form>
-                </div>
-              )}
+                      <span className="text-emerald-400 font-mono font-bold text-xs select-none">&gt;&gt;&gt;</span>
+                      <input
+                        type="text"
+                        value={idleInput}
+                        onChange={(e) => setIdleInput(e.target.value)}
+                        onKeyDown={handleIdleKeyDown}
+                        placeholder="Type Python code (e.g., 2+2, import numpy, help()) [Enter]"
+                        disabled={isIdleRunning}
+                        className="flex-1 bg-transparent font-mono text-xs text-gray-100 placeholder-gray-600 focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!idleInput.trim() || isIdleRunning}
+                        className="rounded-lg bg-emerald-900/60 border border-emerald-600/40 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-800/80 disabled:opacity-40 transition-all flex items-center gap-1"
+                      >
+                        <CornerDownLeft className="h-3 w-3" />
+                        <span>Run</span>
+                      </button>
+                    </form>
+                  </div>
+                )}
 
-              {/* TAB 2: SCRIPT PROGRAM OUTPUT */}
-              {consoleTab === 'terminal' && (
-                <div className="flex-1 p-3 font-mono text-xs overflow-auto leading-relaxed select-text bg-[#030303]">
-                  {executionResult.status === 'running' && (
-                    <div className="flex items-center gap-2 text-blue-400 animate-pulse">
-                      <Sparkles className="h-4 w-4 animate-spin" />
-                      <span>Running Python WebAssembly code...</span>
-                    </div>
-                  )}
-
-                  {executionResult.error ? (
-                    <div className="text-red-400 whitespace-pre-wrap">
-                      <p className="font-bold border-b border-red-900/50 pb-1 mb-2 text-red-300">
-                        Traceback / Execution Error:
-                      </p>
-                      {executionResult.error}
-                    </div>
-                  ) : (
-                    <pre className="text-blue-300/90 whitespace-pre-wrap break-words">
-                      {executionResult.output}
-                    </pre>
-                  )}
-                </div>
-              )}
-
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-
-      </div>
+      )}
 
       {/* Version History Modal */}
       {showVersionHistory && (

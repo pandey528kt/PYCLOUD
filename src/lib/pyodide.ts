@@ -254,6 +254,31 @@ except SyntaxError:
   }
 };
 
+export const getIdleVariables = async (): Promise<Array<{ name: string; type: string; value: string }>> => {
+  try {
+    const pyodide = await loadPyodideEngine();
+    if (!idleNamespaceInitialized) return [];
+    
+    const resultJson = await pyodide.runPythonAsync(`
+import json
+vars_list = []
+for k, v in __idle_globals__.items():
+    if not k.startswith('__') and k not in ['sys', 'math', 'os', 'json', 'datetime', 'random', 're']:
+        try:
+            val_str = repr(v)
+            if len(val_str) > 60:
+                val_str = val_str[:57] + '...'
+            vars_list.append({'name': k, 'type': type(v).__name__, 'value': val_str})
+        except:
+            pass
+json.dumps(vars_list)
+`);
+    return JSON.parse(resultJson);
+  } catch {
+    return [];
+  }
+};
+
 // Python Sample Starter Templates
 export const PYTHON_TEMPLATES: PythonTemplate[] = [
   {
