@@ -25,15 +25,28 @@ import {
   Cpu,
   CornerDownLeft,
   Trash,
+  Bug,
+  StepForward,
+  Square,
+  CircleDot,
+  Variable,
+  ArrowRight,
 } from 'lucide-react';
-import { Project, ExecutionResult, UserProfile, ProjectPrivacy } from '../types';
+import { Project, ExecutionResult, UserProfile, ProjectPrivacy, DebugVariable } from '../types';
 import {
   executePythonCode,
   executeIdleCommand,
+  executeScriptInIdle,
+  preloadPythonEngine,
   resetIdleEnvironment,
   getIdleVariables,
   IDLE_WELCOME_BANNER,
 } from '../lib/pyodide';
+import {
+  executeScriptWithDebugger,
+  resolveDebugAction,
+  setDebugBreakpoints,
+} from '../lib/pyDebugger';
 import { formatPythonCode } from '../lib/pythonFormatter';
 import { VersionHistoryModal } from './VersionHistoryModal';
 import { ShareModal } from './ShareModal';
@@ -90,7 +103,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   }, []);
 
   // Python IDLE Interactive Shell State
-  const [consoleTab, setConsoleTab] = useState<'terminal' | 'idle'>('idle'); // Python IDLE active by default
+  const [consoleTab, setConsoleTab] = useState<'terminal' | 'idle' | 'debug'>('idle'); // Python IDLE active by default
   const [idleLogs, setIdleLogs] = useState<Array<{ id: string; type: 'banner' | 'cmd' | 'out' | 'err'; text: string }>>([
     { id: 'banner', type: 'banner', text: IDLE_WELCOME_BANNER },
   ]);
@@ -99,6 +112,24 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
   const [idleHistoryIndex, setIdleHistoryIndex] = useState<number>(-1);
   const [isIdleRunning, setIsIdleRunning] = useState(false);
   const idleConsoleEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Python Step-by-Step Debugger State
+  const [isDebugActive, setIsDebugActive] = useState(false);
+  const [isDebugPaused, setIsDebugPaused] = useState(false);
+  const [debugCurrentLine, setDebugCurrentLine] = useState<number | null>(null);
+  const [debugBreakpoints, setDebugBreakpointsState] = useState<number[]>([]);
+  const [debugVariables, setDebugVariables] = useState<DebugVariable[]>([]);
+  const editorDecorationsRef = useRef<string[]>([]);
+
+  // Toggle Breakpoint Handler
+  const toggleBreakpoint = useCallback((lineNumber: number) => {
+    setDebugBreakpointsState((prev) => {
+      const exists = prev.includes(lineNumber);
+      const updated = exists ? prev.filter((l) => l !== lineNumber) : [...prev, lineNumber].sort((a, b) => a - b);
+      setDebugBreakpoints(updated);
+      return updated;
+    });
+  }, []);
 
   // Auto-scroll IDLE shell console
   useEffect(() => {
@@ -253,13 +284,66 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         ];
       },
     });
+
+    // Listen to margin mouse clicks to toggle breakpoints
+    editor.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN ||
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS
+      ) {
+        const line = e.target.position?.lineNumber;
+        if (line) {
+          toggleBreakpoint(line);
+        }
+      }
+    });
   };
+
+  // Sync Monaco editor decorations for breakpoints and current debug line highlight
+  useEffect(() => {
+    if (!editorRef.current || !(window as any).monaco) return;
+    const monaco = (window as any).monaco;
+
+    const newDecorations: any[] = [];
+
+    // Add red breakpoint glyph dots
+    debugBreakpoints.forEach((line) => {
+      newDecorations.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: false,
+          glyphMarginClassName: 'debug-breakpoint-glyph',
+          glyphMarginHoverMessage: { value: `Breakpoint at line ${line}` },
+        },
+      });
+    });
+
+    // Add yellow execution arrow and line highlight if currently paused
+    if (isDebugPaused && debugCurrentLine) {
+      newDecorations.push({
+        range: new monaco.Range(debugCurrentLine, 1, debugCurrentLine, 1),
+        options: {
+          isWholeLine: true,
+          className: 'debug-current-line-highlight',
+          glyphMarginClassName: 'debug-current-line-arrow',
+          glyphMarginHoverMessage: { value: `Paused at line ${debugCurrentLine}` },
+        },
+      });
+      editorRef.current.revealLineInCenter(debugCurrentLine);
+    }
+
+    editorDecorationsRef.current = editorRef.current.deltaDecorations(
+      editorDecorationsRef.current,
+      newDecorations
+    );
+  }, [debugBreakpoints, debugCurrentLine, isDebugPaused, toggleBreakpoint]);
 
   // Keep local state in sync when project changes
   useEffect(() => {
     setCode(project.code);
     setTitle(project.title);
     setSaveStatus('saved');
+    preloadPythonEngine();
   }, [project.id]);
 
   // Update Monaco theme dynamically
@@ -294,19 +378,98 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
     }, 1500);
   };
 
-  // Run Code Execution Handler
+  // Run Code Execution Handler (Executes script directly inside Python IDLE REPL Engine)
   const handleRunCode = async () => {
+    setIsConsoleExpanded(true);
+    setConsoleTab('idle');
+
+    const fileName = `${(title || project.title || 'script').toLowerCase().replace(/\s+/g, '_')}.py`;
+    const restartHeader = `==================== RESTART: /workspace/${fileName} ====================`;
+
+    setIdleLogs((prev) => [
+      ...prev,
+      { id: `restart-${Date.now()}`, type: 'banner', text: restartHeader },
+    ]);
+
+    setIsIdleRunning(true);
+
     setExecutionResult({
-      output: 'Initializing Python WebAssembly environment...',
+      output: 'Running script in Python IDLE engine...',
       error: null,
       executionTimeMs: 0,
       status: 'running',
     });
 
-    setIsConsoleExpanded(true);
+    const result = await executeScriptInIdle(code, fileName);
 
-    const result = await executePythonCode(code);
+    if (result.output) {
+      setIdleLogs((prev) => [
+        ...prev,
+        { id: `out-${Date.now()}`, type: 'out', text: result.output },
+      ]);
+    }
+    if (result.error) {
+      setIdleLogs((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, type: 'err', text: result.error },
+      ]);
+    }
+
     setExecutionResult(result);
+    setIsIdleRunning(false);
+    await refreshIdleVars();
+  };
+
+  // Start Step-by-Step Debugger Session Handler
+  const handleStartDebugging = async () => {
+    setIsDebugActive(true);
+    setIsDebugPaused(false);
+    setDebugCurrentLine(null);
+    setIsConsoleExpanded(true);
+    setConsoleTab('debug');
+
+    const fileName = `${(title || project.title || 'script').toLowerCase().replace(/\s+/g, '_')}.py`;
+
+    setExecutionResult({
+      output: `🚀 Debugger initialized. Click Step (F10) or Continue (F5) to step through line-by-line.\nClick line numbers on the editor margin to toggle breakpoints.`,
+      error: null,
+      executionTimeMs: 0,
+      status: 'running',
+    });
+
+    const result = await executeScriptWithDebugger(
+      code,
+      debugBreakpoints,
+      (line, vars) => {
+        setIsDebugPaused(true);
+        setDebugCurrentLine(line);
+        setDebugVariables(vars);
+      },
+      fileName
+    );
+
+    setIsDebugActive(false);
+    setIsDebugPaused(false);
+    setDebugCurrentLine(null);
+    setExecutionResult(result);
+  };
+
+  // Debugger Controls: Step Over, Continue, Stop
+  const handleDebugStepOver = () => {
+    setIsDebugPaused(false);
+    resolveDebugAction('step');
+  };
+
+  const handleDebugContinue = () => {
+    setIsDebugPaused(false);
+    resolveDebugAction('continue');
+  };
+
+  const handleDebugStop = () => {
+    setIsDebugActive(false);
+    setIsDebugPaused(false);
+    setDebugCurrentLine(null);
+    resolveDebugAction('stop');
   };
 
   // Manual Save Snapshot
@@ -352,10 +515,10 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
     }
   };
 
-  // Keyboard shortcut Ctrl/Cmd+Enter for Run, Ctrl/Cmd+S for Save
+  // Keyboard shortcut F5 or Ctrl/Cmd+Enter for Run Module, Ctrl/Cmd+S for Save
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
         e.preventDefault();
         handleRunCode();
       } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -363,7 +526,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
         if (isOwner) handleManualSaveSnapshot();
       }
     },
-    [code, isOwner]
+    [code, isOwner, title, project]
   );
 
   useEffect(() => {
@@ -396,11 +559,11 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
       )}
 
       {/* Workspace Top Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-[#08080a] px-4 py-2.5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-[#0c0e16] px-4 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.6)]">
         
         {/* Left Project Info & Title */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-500/30 bg-blue-950/60 text-blue-400 shadow">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-500/40 bg-[#161a28] text-amber-400 shadow-inner">
             <Code2 className="h-4 w-4" />
           </div>
 
@@ -413,13 +576,13 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                 onBlur={handleTitleSubmit}
                 onKeyDown={(e) => e.key === 'Enter' && handleTitleSubmit()}
                 autoFocus
-                className="rounded-lg border border-blue-500 bg-[#050505] px-2 py-1 text-xs font-bold text-white focus:outline-none"
+                className="rounded-lg border border-amber-500 bg-[#07090e] px-2.5 py-1 text-xs font-extrabold text-white focus:outline-none"
               />
             ) : (
               <h2
                 onClick={() => isOwner && setIsEditingTitle(true)}
-                className={`text-sm font-bold text-gray-100 truncate ${
-                  isOwner ? 'cursor-pointer hover:text-blue-400 hover:underline' : ''
+                className={`text-sm font-extrabold text-slate-100 truncate ${
+                  isOwner ? 'cursor-pointer hover:text-amber-400 hover:underline' : ''
                 }`}
                 title={isOwner ? 'Click to rename project' : title}
               >
@@ -429,14 +592,14 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
 
             {/* Save Status Badge */}
             {isOwner && (
-              <span className="text-[10px] font-mono text-gray-400 px-2 py-0.5 rounded bg-[#050505] border border-white/5 shrink-0">
+              <span className="text-[10px] font-mono text-slate-400 px-2 py-0.5 rounded bg-[#07090e] border border-slate-800 shrink-0 font-bold">
                 {saveStatus === 'saved' && (
-                  <span className="text-blue-400 flex items-center gap-1">
+                  <span className="text-amber-400 flex items-center gap-1">
                     <Check className="h-3 w-3" /> Auto-saved
                   </span>
                 )}
-                {saveStatus === 'unsaved' && <span className="text-amber-400">Unsaved edits...</span>}
-                {saveStatus === 'saving' && <span className="text-indigo-400 animate-pulse">Saving...</span>}
+                {saveStatus === 'unsaved' && <span className="text-amber-500">Unsaved edits...</span>}
+                {saveStatus === 'saving' && <span className="text-blue-400 animate-pulse">Saving...</span>}
               </span>
             )}
           </div>
@@ -447,82 +610,128 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
           
           {/* Python IDLE Status Badge */}
           <div
-            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-950/80 border border-emerald-500/30 text-emerald-300 text-xs font-mono shadow-sm"
+            className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-mono shadow-inner font-bold"
             title="Python 3.12 IDLE Engine installed and ready by default"
           >
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="font-semibold">Python IDLE 3.12</span>
+            <span>Python IDLE 3.12</span>
           </div>
 
-          {/* Run Code Button */}
+          {/* Run Code / Module Button (Python IDLE Standard F5) */}
           <button
-            onClick={() => {
-              setConsoleTab('terminal');
-              handleRunCode();
-            }}
-            disabled={executionResult.status === 'running'}
-            className="flex items-center gap-2 rounded-xl border border-blue-400/30 bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-500 px-4 py-1.5 text-xs font-bold text-white shadow-[0_4px_15px_rgba(37,99,235,0.35)] hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all"
-            title="Execute Python script (Ctrl+Enter)"
+            onClick={() => handleRunCode()}
+            disabled={isIdleRunning || isDebugActive}
+            className="flex items-center gap-2 btn-3d-emerald rounded-xl px-4 py-1.5 text-xs font-extrabold text-white shadow"
+            title="Run Module in Python IDLE Shell (F5 or Ctrl+Enter)"
           >
-            <Play className={`h-3.5 w-3.5 fill-current ${executionResult.status === 'running' ? 'animate-spin' : ''}`} />
-            <span>{executionResult.status === 'running' ? 'Running...' : 'Run Code'}</span>
+            <Play className={`h-3.5 w-3.5 fill-current ${isIdleRunning ? 'animate-spin' : ''}`} />
+            <span>{isIdleRunning ? 'Running IDLE...' : 'Run Module'}</span>
           </button>
+
+          {/* Debugger Active Controls or Start Debugger Button */}
+          {isDebugActive ? (
+            <div className="flex items-center gap-1.5 bg-[#141724] border border-amber-500/60 p-1 rounded-xl shadow-lg">
+              <button
+                onClick={handleDebugContinue}
+                disabled={!isDebugPaused}
+                className="flex items-center gap-1 px-2.5 py-1 btn-3d-emerald text-white font-extrabold text-xs disabled:opacity-40 rounded-lg"
+                title="Continue Execution (F5)"
+              >
+                <Play className="h-3 w-3 fill-current" />
+                <span>Continue</span>
+              </button>
+
+              <button
+                onClick={handleDebugStepOver}
+                disabled={!isDebugPaused}
+                className="flex items-center gap-1 px-2.5 py-1 btn-3d-slate text-white font-extrabold text-xs disabled:opacity-40 rounded-lg"
+                title="Step Over Current Line (F10)"
+              >
+                <StepForward className="h-3 w-3" />
+                <span>Step Over</span>
+              </button>
+
+              <button
+                onClick={handleDebugStop}
+                className="flex items-center gap-1 px-2.5 py-1 bg-red-700 hover:bg-red-600 border-b-2 border-red-900 text-white font-extrabold text-xs rounded-lg active:translate-y-[1px]"
+                title="Stop Debugger Session"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                <span>Stop</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleStartDebugging}
+              disabled={isIdleRunning}
+              className="flex items-center gap-1.5 btn-3d-gold rounded-xl px-3.5 py-1.5 text-xs font-extrabold text-white shadow"
+              title="Start Step-by-Step Debugger with Breakpoints"
+            >
+              <Bug className="h-3.5 w-3.5" />
+              <span>Debug Script</span>
+              {debugBreakpoints.length > 0 && (
+                <span className="ml-1 rounded-full bg-red-600 text-[10px] px-1.5 py-0.2 font-black text-white">
+                  {debugBreakpoints.length}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Manual Save Snapshot */}
           {isOwner && (
             <button
               onClick={handleManualSaveSnapshot}
-              className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-[#0a0a0d] px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-[#121218] transition-all shadow"
+              className="flex items-center gap-1.5 btn-3d-dark rounded-xl px-3 py-1.5 text-xs font-bold text-slate-200"
               title="Save code snapshot (Ctrl+S)"
             >
-              <Save className="h-3.5 w-3.5 text-blue-400" />
-              <span className="hidden sm:inline">Save Snapshot</span>
+              <Save className="h-3.5 w-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Save</span>
             </button>
           )}
 
           {/* Version History */}
           <button
             onClick={() => setShowVersionHistory(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-white/5 bg-[#050505] px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-[#101015] transition-all"
+            className="flex items-center gap-1.5 btn-3d-dark rounded-xl px-3 py-1.5 text-xs font-bold text-slate-300"
             title="View code version history"
           >
-            <History className="h-3.5 w-3.5 text-indigo-400" />
+            <History className="h-3.5 w-3.5 text-blue-400" />
             <span className="hidden md:inline">History</span>
           </button>
 
           {/* Format Code Button */}
           <button
             onClick={handleFormatCode}
-            className="flex items-center gap-1.5 rounded-xl border border-white/5 bg-[#050505] px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-[#101015] hover:text-blue-400 transition-all"
+            className="flex items-center gap-1.5 btn-3d-dark rounded-xl px-3 py-1.5 text-xs font-bold text-slate-300"
             title="Auto-format Python code (Black / PEP 8 style) [Shift+Alt+F]"
           >
-            <Wand2 className="h-3.5 w-3.5 text-blue-400" />
+            <Wand2 className="h-3.5 w-3.5 text-amber-400" />
             <span className="hidden sm:inline">Format</span>
           </button>
 
           {/* Share Button */}
           <button
             onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-white/5 bg-[#050505] px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-[#101015] transition-all"
+            className="flex items-center gap-1.5 btn-3d-dark rounded-xl px-3 py-1.5 text-xs font-bold text-slate-300"
             title="Share project link"
           >
-            <Share2 className="h-3.5 w-3.5 text-indigo-400" />
+            <Share2 className="h-3.5 w-3.5 text-blue-400" />
             <span className="hidden md:inline">Share</span>
           </button>
 
           {/* Copy Code */}
           <button
             onClick={handleCopyCode}
-            className="rounded-xl border border-white/5 bg-[#050505] p-2 text-gray-400 hover:text-gray-200 hover:bg-[#101015] transition-colors"
+            className="btn-3d-dark rounded-xl p-2 text-slate-300"
             title="Copy Python code to clipboard"
           >
-            {copiedCode ? <Check className="h-3.5 w-3.5 text-blue-400" /> : <Copy className="h-3.5 w-3.5" />}
+            {copiedCode ? <Check className="h-3.5 w-3.5 text-amber-400" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
 
           {/* Download File */}
           <button
             onClick={handleDownloadFile}
-            className="rounded-xl border border-white/5 bg-[#050505] p-2 text-gray-400 hover:text-gray-200 hover:bg-[#101015] transition-colors"
+            className="btn-3d-dark rounded-xl p-2 text-slate-300"
             title="Download .py file"
           >
             <Download className="h-3.5 w-3.5" />
@@ -824,6 +1033,7 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
               options={{
                 readOnly: !isOwner,
                 fontSize: 14,
+                glyphMargin: true,
                 minimap: { enabled: true },
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
@@ -896,6 +1106,27 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                   <Cpu className="h-3.5 w-3.5 text-emerald-400" />
                   <span>IDLE REPL</span>
                 </button>
+
+                <button
+                  onClick={() => {
+                    setConsoleTab('debug');
+                    if (!isConsoleExpanded) setIsConsoleExpanded(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    consoleTab === 'debug'
+                      ? 'bg-amber-950/80 text-amber-300 border border-amber-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                  title="Step-by-Step Python Debugger & Variables"
+                >
+                  <Bug className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Debugger & Variables</span>
+                  {debugBreakpoints.length > 0 && (
+                    <span className="text-[10px] text-red-300 bg-red-950/80 border border-red-800/60 px-1 rounded font-bold">
+                      {debugBreakpoints.length} BP
+                    </span>
+                  )}
+                </button>
               </div>
 
               {/* Header Right Actions */}
@@ -948,9 +1179,9 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                 {consoleTab === 'terminal' && (
                   <div className="flex-1 p-3 font-mono text-xs overflow-auto leading-relaxed select-text bg-[#030303]">
                     {executionResult.status === 'running' && (
-                      <div className="flex items-center gap-2 text-blue-400 animate-pulse">
+                      <div className="flex items-center gap-2 text-emerald-400 animate-pulse">
                         <Sparkles className="h-4 w-4 animate-spin" />
-                        <span>Running Python WebAssembly code...</span>
+                        <span>Running Python IDLE script...</span>
                       </div>
                     )}
 
@@ -969,7 +1200,131 @@ export const EditorWorkspace: React.FC<EditorWorkspaceProps> = ({
                   </div>
                 )}
 
-                {/* TAB 2: PYTHON IDLE SHELL */}
+                {/* TAB 3: STEP-BY-STEP DEBUGGER & VARIABLE INSPECTOR */}
+                {consoleTab === 'debug' && (
+                  <div className="flex-1 flex flex-col md:flex-row min-h-0 bg-[#030303] divide-y md:divide-y-0 md:divide-x divide-white/5 overflow-auto">
+                    
+                    {/* Left: Variable Inspector */}
+                    <div className="flex-1 p-3 flex flex-col min-h-0 font-mono text-xs">
+                      <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-2">
+                        <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                          <Variable className="h-4 w-4 text-amber-400" />
+                          <span>Scope Variables</span>
+                          {isDebugPaused && debugCurrentLine && (
+                            <span className="ml-2 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40">
+                              Paused @ Line {debugCurrentLine}
+                            </span>
+                          )}
+                        </span>
+
+                        {/* Quick Debugger Controls */}
+                        {isDebugActive && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={handleDebugStepOver}
+                              disabled={!isDebugPaused}
+                              className="px-2 py-1 rounded bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-500 disabled:opacity-40 transition-all flex items-center gap-1"
+                            >
+                              <StepForward className="h-3 w-3" />
+                              <span>Step Over</span>
+                            </button>
+                            <button
+                              onClick={handleDebugContinue}
+                              disabled={!isDebugPaused}
+                              className="px-2 py-1 rounded bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-500 disabled:opacity-40 transition-all flex items-center gap-1"
+                            >
+                              <Play className="h-3 w-3 fill-current" />
+                              <span>Continue</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {debugVariables.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-gray-500">
+                          <Bug className="h-8 w-8 text-gray-600 mb-2 opacity-50" />
+                          <p className="text-xs">
+                            {isDebugActive
+                              ? 'No user variables defined at this breakpoint yet.'
+                              : 'Click "Debug Script" above or set breakpoints in the editor margin to step line-by-line.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+                          {debugVariables.map((v, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between p-2 rounded-lg bg-[#08080c] border border-white/5 hover:border-amber-500/30 transition-all"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-amber-300 shrink-0">{v.name}</span>
+                                <span className="text-[10px] text-gray-400 bg-white/5 px-1.5 py-0.5 rounded shrink-0">
+                                  {v.type}
+                                </span>
+                              </div>
+                              <span className="font-mono text-gray-200 text-xs truncate max-w-[200px] bg-[#020203] px-2 py-0.5 rounded border border-white/5">
+                                {v.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: Breakpoints Panel */}
+                    <div className="w-full md:w-64 p-3 flex flex-col min-h-0 font-mono text-xs bg-[#050508]">
+                      <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-2">
+                        <span className="font-bold text-gray-200 flex items-center gap-1.5">
+                          <CircleDot className="h-4 w-4 text-red-500" />
+                          <span>Active Breakpoints</span>
+                        </span>
+                        {debugBreakpoints.length > 0 && (
+                          <button
+                            onClick={() => {
+                              setDebugBreakpointsState([]);
+                              setDebugBreakpoints([]);
+                            }}
+                            className="text-[10px] text-gray-400 hover:text-red-400 transition-colors"
+                          >
+                            Clear All
+                          </button>
+                        )}
+                      </div>
+
+                      {debugBreakpoints.length === 0 ? (
+                        <div className="text-gray-500 text-[11px] italic text-center p-3">
+                          Click any line number in the code editor gutter to set breakpoints.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 overflow-y-auto flex-1">
+                          {debugBreakpoints.map((line) => (
+                            <div
+                              key={line}
+                              className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border transition-all ${
+                                debugCurrentLine === line
+                                  ? 'bg-amber-950/60 border-amber-500/60 text-amber-200 font-bold'
+                                  : 'bg-[#0a0a0f] border-white/5 text-gray-300 hover:border-red-500/30'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-red-500 shadow-sm shadow-red-500"></span>
+                                <span>Line {line}</span>
+                              </div>
+                              <button
+                                onClick={() => toggleBreakpoint(line)}
+                                className="text-gray-500 hover:text-red-400 p-0.5 rounded transition-colors"
+                                title="Remove breakpoint"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
                 {consoleTab === 'idle' && (
                   <div className="flex-1 flex flex-col min-h-0">
                     {/* IDLE Log Output Container */}

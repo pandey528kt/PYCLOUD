@@ -16,19 +16,21 @@ export const Card3D: React.FC<Card3DProps> = ({
   return (
     <div
       onClick={onClick}
-      className={`relative rounded-2xl border border-white/5 bg-[#08080a]/95 text-gray-200 
-        shadow-[0_12px_36px_rgba(0,0,0,0.85)] transition-all duration-300 ease-out
+      className={`relative rounded-2xl border border-slate-800/80 bg-[#131622] text-slate-200 
+        shadow-[0_12px_32px_rgba(0,0,0,0.7),_inset_0_1px_0_rgba(255,255,255,0.08)] 
+        transition-all duration-200 ease-out overflow-hidden
         ${
           hoverEffect
-            ? 'hover:-translate-y-1.5 hover:border-white/20 hover:shadow-[0_22px_45px_rgba(0,0,0,0.95),0_0_25px_rgba(59,130,246,0.12)] hover:bg-[#0c0c10]'
+            ? 'hover:-translate-y-1 hover:border-slate-700 hover:shadow-[0_20px_42px_rgba(0,0,0,0.85),_inset_0_1px_0_rgba(255,255,255,0.12)]'
             : ''
         }
-        ${onClick ? 'cursor-pointer active:translate-y-0 active:shadow-[0_6px_20px_rgba(0,0,0,0.9)]' : ''}
+        ${onClick ? 'cursor-pointer active:translate-y-0 active:shadow-[0_6px_20px_rgba(0,0,0,0.8)]' : ''}
         ${className}`}
     >
-      {/* Immersive top rim highlight gradient */}
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent rounded-t-2xl pointer-events-none" />
+      {/* Top metallic rim bevel line */}
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent pointer-events-none" />
       {children}
     </div>
   );
 };
+

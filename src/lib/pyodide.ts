@@ -55,6 +55,23 @@ export const loadPyodideEngine = (): Promise<any> => {
   return loadPromise;
 };
 
+// Immediately pre-warm Python IDLE engine in background
+export const preloadPythonEngine = async (): Promise<void> => {
+  try {
+    await loadPyodideEngine();
+    await resetIdleEnvironment();
+  } catch (err) {
+    console.warn('Python IDLE engine pre-warm note:', err);
+  }
+};
+
+// Trigger instant pre-warm on module load
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    preloadPythonEngine();
+  }, 100);
+}
+
 export const executePythonCode = async (
   code: string,
   onInputRequired?: (promptText: string) => Promise<string>
@@ -250,6 +267,86 @@ except SyntaxError:
     return {
       output: outText,
       error: errText,
+    };
+  }
+};
+
+export const executeScriptInIdle = async (
+  code: string,
+  fileName: string = 'main.py'
+): Promise<ExecutionResult> => {
+  const startTime = performance.now();
+  let stdoutLogs: string[] = [];
+
+  try {
+    const pyodide = await loadPyodideEngine();
+
+    // Auto-load missing packages for script
+    try {
+      if (pyodide.loadPackagesFromImports) {
+        await pyodide.loadPackagesFromImports(code);
+      }
+    } catch {
+      // Ignore
+    }
+
+    // Reset IDLE environment for a clean RESTART state
+    await resetIdleEnvironment();
+
+    pyodide.globals.set('idle_stdout_cb', (text: string) => {
+      stdoutLogs.push(text);
+    });
+
+    (window as any).handlePythonInput = (promptMsg: string) => {
+      const userInput = window.prompt(promptMsg || 'Python Input:') || '';
+      return userInput;
+    };
+
+    const runnerScript = `
+import sys, io
+
+class IdleStdout(io.TextIOBase):
+    def write(self, s):
+        idle_stdout_cb(s)
+        return len(s)
+
+sys.stdout = IdleStdout()
+sys.stderr = IdleStdout()
+
+def handle_python_input(prompt_msg=''):
+    import js
+    return js.window.handlePythonInput(prompt_msg)
+
+import builtins
+builtins.input = handle_python_input
+
+code_str = ${JSON.stringify(code)}
+file_name = ${JSON.stringify(fileName)}
+
+compiled = compile(code_str, file_name, 'exec')
+exec(compiled, __idle_globals__)
+`;
+
+    await pyodide.runPythonAsync(runnerScript);
+
+    const endTime = performance.now();
+    return {
+      output: stdoutLogs.join(''),
+      error: null,
+      executionTimeMs: Math.round(endTime - startTime),
+      status: 'success',
+    };
+  } catch (err: any) {
+    const endTime = performance.now();
+    let errText = err?.message || String(err);
+    if (errText.includes('PythonError:')) {
+      errText = errText.replace(/PythonError: Traceback \(most recent call last\):/g, 'Traceback (most recent call last):');
+    }
+    return {
+      output: stdoutLogs.join(''),
+      error: errText,
+      executionTimeMs: Math.round(endTime - startTime),
+      status: 'error',
     };
   }
 };

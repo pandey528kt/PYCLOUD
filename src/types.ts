@@ -39,6 +39,21 @@ export interface ExecutionResult {
   status: 'idle' | 'running' | 'success' | 'error';
 }
 
+export interface DebugVariable {
+  name: string;
+  type: string;
+  value: string;
+}
+
+export interface DebuggerState {
+  isDebugging: boolean;
+  isPaused: boolean;
+  currentLine: number | null;
+  breakpoints: number[];
+  variables: DebugVariable[];
+  steppingMode: 'continue' | 'step' | 'stop';
+}
+
 export interface PythonTemplate {
   id: string;
   title: string;

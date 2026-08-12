@@ -140,35 +140,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-8">
       
       {/* Hero / Stats Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#0c0c10] via-[#08080a] to-[#050505] p-6 md:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.9)]">
-        <div className="absolute top-0 right-0 -mt-12 -mr-12 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 -mb-12 -ml-12 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+      <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-[#121520] p-6 md:p-8 shadow-[0_16px_40px_rgba(0,0,0,0.8),_inset_0_1px_0_rgba(255,255,255,0.1)]">
+        {/* Top Rim Bevel */}
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 pointer-events-none" />
 
         <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-950/60 px-3 py-1 text-xs text-blue-400 font-mono">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>3D Tactile Cloud IDE • Pyodide WASM Runtime</span>
+          <div className="space-y-2.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-300 font-mono font-bold shadow-sm">
+              <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+              <span>3D Tactile Cloud IDE • Pyodide WASM Engine</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
               Python Cloud Workspace
             </h1>
-            <p className="text-sm text-gray-400 leading-relaxed">
-              Create, edit, run, and share Python projects anywhere. Auto-saved to Firebase with version history and browser-native WebAssembly execution.
+            <p className="text-xs md:text-sm text-slate-300 leading-relaxed">
+              Build, run, debug, and sync Python applications in a high-performance 3D environment. Powered by client-side WebAssembly execution and cloud persistence.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
             <button
               onClick={() => setShowNewModal(true)}
-              className="flex-1 lg:flex-initial flex items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_6px_22px_rgba(37,99,235,0.4)] hover:brightness-110 active:scale-95 transition-all"
+              className="flex-1 lg:flex-initial flex items-center justify-center gap-2 btn-3d-gold rounded-xl px-5 py-3 text-xs font-extrabold text-white shadow-lg"
             >
               <Plus className="h-4 w-4" />
               <span>New Python Script</span>
             </button>
 
-            <label className="flex-1 lg:flex-initial flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#0a0a0d] px-4 py-3 text-sm font-medium text-gray-200 cursor-pointer hover:bg-[#121218] hover:border-white/20 active:scale-95 transition-all shadow-md">
-              <Upload className="h-4 w-4 text-blue-400" />
+            <label className="flex-1 lg:flex-initial flex items-center justify-center gap-2 btn-3d-dark rounded-xl px-4 py-3 text-xs font-bold text-slate-200 cursor-pointer shadow-md">
+              <Upload className="h-4 w-4 text-amber-400" />
               <span>Import .py File</span>
               <input
                 type="file"
@@ -181,26 +181,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Workspace Quick Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 pt-6 border-t border-white/5">
-          <div className="rounded-xl border border-white/5 bg-[#050505]/80 p-3.5 shadow-inner">
-            <p className="text-xs font-mono text-gray-400">Total Projects</p>
-            <p className="text-xl font-bold text-white mt-1">{projects.length}</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 pt-6 border-t border-slate-800">
+          <div className="rounded-xl border border-slate-800/90 bg-[#0a0c12] p-3.5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]">
+            <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Total Projects</p>
+            <p className="text-2xl font-extrabold text-white mt-1">{projects.length}</p>
           </div>
-          <div className="rounded-xl border border-white/5 bg-[#050505]/80 p-3.5 shadow-inner">
-            <p className="text-xs font-mono text-gray-400">Private Code</p>
-            <p className="text-xl font-bold text-blue-400 mt-1">
+          <div className="rounded-xl border border-slate-800/90 bg-[#0a0c12] p-3.5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]">
+            <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Private Code</p>
+            <p className="text-2xl font-extrabold text-amber-400 mt-1">
               {projects.filter((p) => p.privacy === 'private').length}
             </p>
           </div>
-          <div className="rounded-xl border border-white/5 bg-[#050505]/80 p-3.5 shadow-inner">
-            <p className="text-xs font-mono text-gray-400">Shared Links</p>
-            <p className="text-xl font-bold text-indigo-400 mt-1">
+          <div className="rounded-xl border border-slate-800/90 bg-[#0a0c12] p-3.5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]">
+            <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Shared Links</p>
+            <p className="text-2xl font-extrabold text-blue-400 mt-1">
               {projects.filter((p) => p.privacy === 'shared' || p.isShared).length}
             </p>
           </div>
-          <div className="rounded-xl border border-white/5 bg-[#050505]/80 p-3.5 shadow-inner">
-            <p className="text-xs font-mono text-gray-400">Total Lines</p>
-            <p className="text-xl font-bold text-gray-300 mt-1">
+          <div className="rounded-xl border border-slate-800/90 bg-[#0a0c12] p-3.5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]">
+            <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Total Lines</p>
+            <p className="text-2xl font-extrabold text-slate-200 mt-1">
               {projects.reduce((acc, p) => acc + p.code.split('\n').length, 0)}
             </p>
           </div>
@@ -211,18 +211,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         {/* Search Bar */}
         <div className="relative w-full sm:w-96">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
             type="text"
             placeholder="Search projects by name, code, keyword..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-[#08080a] pl-10 pr-4 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-inner"
+            className="w-full input-3d rounded-xl pl-10 pr-8 py-2.5 text-xs text-slate-200 placeholder-slate-500 font-sans"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -230,33 +230,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Privacy Segment Filter */}
-        <div className="flex items-center rounded-xl border border-white/5 bg-[#08080a] p-1 w-full sm:w-auto shadow-inner">
+        <div className="flex items-center rounded-xl border border-slate-800 bg-[#080a10] p-1 w-full sm:w-auto shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)]">
           <button
             onClick={() => setFilterPrivacy('all')}
-            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-medium rounded-lg transition-all ${
+            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
               filterPrivacy === 'all'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow border border-blue-400/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'btn-3d-gold text-white'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             All ({projects.length})
           </button>
           <button
             onClick={() => setFilterPrivacy('private')}
-            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-medium rounded-lg transition-all ${
+            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
               filterPrivacy === 'private'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow border border-blue-400/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'btn-3d-gold text-white'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             Private
           </button>
           <button
             onClick={() => setFilterPrivacy('shared')}
-            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-medium rounded-lg transition-all ${
+            className={`flex-1 sm:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
               filterPrivacy === 'shared'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow border border-blue-400/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'btn-3d-gold text-white'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             Shared
